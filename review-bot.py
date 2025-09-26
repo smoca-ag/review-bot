@@ -84,7 +84,7 @@ def main():
                 if not args.no_post:
                     mr_request.post_review(issue, old_path, new_path, old_pos, new_pos)
         except json.decoder.JSONDecodeError as e:
-            logger.error(f"Error loading response json from LLM: {e}", extra={'response': response})
+            logger.error(f"Error loading response json from LLM: {e} {response}")
 
 
     # Post inline comments to GitLab
