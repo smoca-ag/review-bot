@@ -10,6 +10,7 @@ class Gitlab():
         self.merge_request_iid = merge_request_iid
     def load(self):
         self.versions = self.get_versions()
+        self.discussions = self.get_discussion()
         self.diff_response = self.get_merge_request_diff()
         self.mr = self.get_mr()
 
@@ -28,78 +29,41 @@ class Gitlab():
         return paths_dict
 
     def get_versions(self):
-        """
-        Fetches the diff from a GitLab merge request
-
-        Args:
-            project_id (int): The project ID in GitLab
-            merge_request_iid (int): The merge request IID
-            gitlab_url (str): Base URL of your GitLab instance
-            private_token (str): Your GitLab private token
-
-        Returns:
-            str: The raw diff content
-        """
-
-        # Construct the API endpoint
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/versions"
+        return self.get_json_response(url)
 
-        # Set up headers with authentication
+
+    def get_json_response(self, url):
         headers = {
             "PRIVATE-TOKEN": self.private_token
         }
-
-        try:
-            # Make the API request
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()  # Raises an HTTPError for bad responses
-
-            # Return the diff content
-            return response.json()
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Error fetching merge request diff: {e}")
+        response = requests.get(url, headers=headers)
+        if not response.ok:
+            self.logger.error(f"Error fetching {url}: {response}")
             return None
+        return response.json()
 
+    def get_text_response(self, url):
+        headers = {
+            "PRIVATE-TOKEN": self.private_token
+        }
+        response = requests.get(url, headers=headers)
+        if not response.ok:
+            self.logger.error(f"Error fetching {url}: {response}")
+            return None
+        return response.text
 
     def get_merge_request_diff(self):
         # Construct the API endpoint
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/raw_diffs"
+        return self.get_text_response(url)
 
-        # Set up headers with authentication
-        headers = {
-            "PRIVATE-TOKEN": self.private_token
-        }
-
-        try:
-            # Make the API request
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()  # Raises an HTTPError for bad responses
-
-            # Return the diff content
-            return response.text
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Error fetching merge request diff: {e}")
-            return None
 
     def get_mr(self):
         # Construct the API endpoint
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}"
-        # Set up headers with authentication
-        headers = {
-            "PRIVATE-TOKEN": self.private_token
-        }
-        try:
-            # Make the API request
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()  # Raises an HTTPError for bad responses
-            # Return the diff content
-            return response.json()
+        return self.get_json_response(url)
 
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Error fetching merge request diff: {e}")
-            return None
 
     def get_file(self, file_path):
         """
@@ -109,20 +73,16 @@ class Gitlab():
         # URL-encode the file path to handle special characters
         encoded_file_path = urllib.parse.quote_plus(file_path)
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/repository/files/{encoded_file_path}?ref={commit_sha}"
-        headers = {"PRIVATE-TOKEN": self.private_token}
-
-        try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-
-            # GitLab API returns file content as a base64 encoded string
-            content_base64 = response.json()['content']
-            decoded_content = base64.b64decode(content_base64).decode('utf-8')
-            return decoded_content
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Error fetching file content for '{file_path}': {e}")
+        response = self.get_json_response(url)
+        if not response:
             return None
+        content_base64 = response['content']
+        decoded_content = base64.b64decode(content_base64).decode('utf-8')
+        return decoded_content
+
+    def get_discussion(self):
+        url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
+        return self.get_json_response(url)
 
     def post_review_as_inline_comments(self,payload):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
@@ -134,10 +94,16 @@ class Gitlab():
         if not response.ok:
             self.logger.error(f"Error posting inline comment to GitLab: {response}")
     def post_review(self, issue, old_path, new_path, old_position, new_position):
+
+
         if new_path == "/dev/null":
             new_path = None
         if old_path == "/dev/null":
             old_path = None
+        if any((discussion['notes'][0]["position"]["new_path"]== new_path and discussion['notes'][0]["position"]["new_line"] == new_position) for discussion in self.discussions):
+            self.logger.info(f"Already a discussion on path {new_path} and position {new_position}")
+            return
+
         comment_text = f"""**{issue['severity']} / {issue['category']}** : {issue['summary']}
 
 **suggestion** : `{issue['suggestion']} `
