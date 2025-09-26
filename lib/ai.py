@@ -6,10 +6,8 @@ class AI:
         self.messages = []
 
     def question_persistent(self, question):
+        response = self.question(question)
         self.messages.append({'role': 'user', 'content': question})
-        response = self.client.chat(
-            model=self.model,
-            messages=self.messages,)['message']['content']
         self.messages.append({'role': 'assistant', 'content': response})
         return response
 
@@ -17,7 +15,7 @@ class AI:
     def question(self, question):
         response = self.client.chat(
             model=self.model,
-            messages=[*self.messages, {'role': 'user', 'content': question}]
+            messages=[*self.messages, {'role': 'user', 'content': question}],
+            options = {"temperature": 0}
         )['message']['content']
-        self.messages.append({'role': 'assistant', 'content': response})
         return response

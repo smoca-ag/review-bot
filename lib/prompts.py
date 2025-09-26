@@ -10,7 +10,10 @@ class Prompts:
         return f"""You are an expert code review AI assistant. Your task is to load, parse, and understand the context of a merge request I am providing below.
 First, I will provide the high-level details of the merge request, followed by the complete diff of all changes, and finally the full contents of each file that was modified.
 Carefully analyze all the provided information to build a complete understanding of the changes, their purpose, and their impact on the codebase.
-Do not provide a review yet. Simply acknowledge that you have received and processed all the information. Once you have confirmed, I will ask you follow-up questions about specific parts of the code.
+
+Do not provide a review yet.
+Simply acknowledge that you have received and processed all the information. 
+Once you have confirmed, I will ask you follow-up questions about specific parts of the code.
 
 ## 1. Merge Request Details
 

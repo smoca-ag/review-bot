@@ -1,13 +1,51 @@
+import os
+
 import requests
 import urllib
 import base64
+from urllib.parse import urlparse, quote
+
+
+def extract_gitlab_info(url):
+    parsed_url = urlparse(url)
+
+    # Extract protocol
+    protocol = parsed_url.scheme
+
+    # Extract host and port
+    host = parsed_url.netloc
+
+    # Extract project path and merge request id
+    path_parts = parsed_url.path.split('/')
+
+    # Find the project path (from first non-empty part until before "-/merge_requests")
+    project_parts = []
+    for i in range(1, len(path_parts)):  # Start from index 1 (after first empty string)
+        if path_parts[i] == '-':
+            break
+        if path_parts[i]:  # Skip empty strings
+            project_parts.append(path_parts[i])
+
+    project_path = '/'.join(project_parts)
+
+    # Extract merge request id
+    mr_id = None
+    for i in range(len(path_parts)):
+        if path_parts[i] == 'merge_requests' and i + 1 < len(path_parts):
+            mr_id = path_parts[i + 1]
+            break
+
+    return [f"{protocol}://{host}", quote(project_path, safe=''), int(mr_id)]
+
 class Gitlab():
-    def __init__(self, logger, gitlab_url, private_token, project_id, merge_request_iid):
+    def __init__(self, logger, url):
         self.logger = logger
-        self.gitlab_url = gitlab_url
-        self.private_token = private_token
-        self.project_id = project_id
-        self.merge_request_iid = merge_request_iid
+        [self.gitlab_url, self.project_id, self.merge_request_iid] = extract_gitlab_info(url)
+        if not self.gitlab_url:
+            raise ValueError("Error: GitLab URL must be provided (https://gitlab.example.com/example-group/example-project/-/merge_requests/19)")
+        self.private_token = os.getenv('GITLAB_API_TOKEN')
+        if not self.private_token:
+            raise ValueError("Error: GITLAB_API_TOKEN environment variable is not set")
     def load(self):
         self.versions = self.get_versions()
         self.discussions = self.get_discussion()
@@ -24,8 +62,7 @@ class Gitlab():
     def get_files(self, paths):
         paths_dict = {}
         for path in paths:
-            if path not in paths_dict:
-                paths_dict[path] = self.get_file(path)
+            paths_dict[path] = self.get_file(path)
         return paths_dict
 
     def get_versions(self):
