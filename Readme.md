@@ -24,7 +24,7 @@ Before you begin, ensure you have the following installed and configured:
   - **Python 3.8+**
   - **GitLab Account**: A GitLab account with access to the target project.
   - **GitLab Personal Access Token**: A [Personal Access Token](https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html) with `api` scope to allow the script to interact with your project.
-  - **Ollama**: An instance of [Ollama](https://ollama.com/) running with a suitable model for code review (e.g., `codellama`, `qwen2-coder`, etc.).
+  - **Ollama**: An instance of [Ollama](https://ollama.com/) running with a suitable model for code review (e.g., `codellama`, `qwen3-coder`, etc.).
 
 -----
 
@@ -62,7 +62,7 @@ Before you begin, ensure you have the following installed and configured:
     PRIVATE_TOKEN="your_private_gitlab_token"
 
     # The Ollama model to use for the review
-    OLLAMA_MODEL="qwen2-coder:34b"
+    OLLAMA_MODEL="qwen3-coder:30b"
 
     # The URL of your running Ollama instance
     OLLAMA_URL="http://localhost:11434"
