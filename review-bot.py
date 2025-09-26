@@ -8,6 +8,7 @@ import logging
 
 from lib.ai import AI
 from lib.gitlab import Gitlab
+from lib.parse_mr_url import extract_gitlab_info
 from lib.prompts import Prompts
 from lib.diff import process_diff, paths_from_diff
 
@@ -16,8 +17,7 @@ def main():
     load_dotenv()
 
     parser = argparse.ArgumentParser(description='AI Code Review for GitLab Merge Requests')
-    parser.add_argument('project_id', type=int, help='GitLab Project ID')
-    parser.add_argument('merge_request_id', type=int, help='Merge Request ID')
+    parser.add_argument('merge_request_url', type=str, help='Merge Request URL')
     parser.add_argument('--no-post', action='store_true', help='Don\'t post to GitLab, just show the review')
 
     args = parser.parse_args()
@@ -27,22 +27,17 @@ def main():
     logger.addHandler(logging.StreamHandler(sys.stdout))
 
     # Get configuration from environment variables
-    gitlab_url = os.getenv('GITLAB_URL')
     private_token = os.getenv('PRIVATE_TOKEN')
     ollama_model = os.getenv('OLLAMA_MODEL', 'qwen3-coder:30b')
     ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
-
-    # Validate environment variables
-    if not gitlab_url:
-        logger.error("Error: GITLAB_URL environment variable is required")
-        sys.exit(1)
 
     if not private_token:
         logger.error("Error: PRIVATE_TOKEN environment variable is required")
         sys.exit(1)
 
-    project_id = args.project_id
-    merge_request_iid = args.merge_request_id
+    [gitlab_url, project_id, merge_request_iid] = extract_gitlab_info(args.merge_request_url)
+    if not gitlab_url:
+        parser.error("Error: GitLab URL must be provided (https://gitlab.example.com/example-group/example-project/-/merge_requests/19)")
 
 
     prompts = Prompts(logger)

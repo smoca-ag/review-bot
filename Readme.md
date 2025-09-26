@@ -1,114 +1,107 @@
+
 # AI Code Reviewer for GitLab
 
-This Python script leverages a local AI model via [Ollama](https://ollama.com/) 
-to perform automated code reviews on GitLab Merge Requests (MRs). It analyzes the changes (diffs) in an MR, s
-ends the code to an AI model for feedback, and posts the AI's findings as inline comments directly on the merge request.
-
------
+This tool leverages AI models, via [Ollama](https://ollama.com/), to perform automated code reviews on GitLab Merge Requests (MRs). 
+It analyzes the code changes (diffs), identifies potential issues, and posts them as inline comments directly on the MR.
 
 ## Features
 
-  - **GitLab Integration**: Fetches merge request details, diffs, and file contents directly from the GitLab API.
-  - **AI-Powered Review**: Uses a local Ollama-compatible large language model to analyze code for potential issues, bugs, or style violations.
-  - **Inline Commenting**: Posts review comments directly on the relevant lines of code within the GitLab MR.
-  - **Context-Aware**: Provides the AI with the full context of the MR (title, diff, and full files) before asking for a line-by-line review.
-  - **Flexible & Local**: Runs with any Ollama model, keeping your code on your own infrastructure.
-  - **Dry-Run Mode**: Allows you to generate a review and see the output in your console without posting it to GitLab using the `--no-post` flag.
+  - **Automated MR Analysis**: Fetches MR details and diffs directly from GitLab.
+  - **AI-Powered Review**: Uses a local AI model through Ollama to review code changes line-by-line.
+  - **Context-Aware**: Provides the AI with the full context of the MR (title, full diff, and file contents) before reviewing individual lines.
+  - **Inline Commenting**: Posts findings as actionable inline comments in the GitLab MR.
+  - **Dry-Run Mode**: Allows you to see the review output in the console without posting to GitLab using the `--no-post` flag.
+  - **Configurable**: Easily configure the GitLab token, Ollama URL, and model via environment variables.
 
 -----
 
-## Prerequisites
+## Requirements
 
-Before you begin, ensure you have the following installed and configured:
-
-  - **Python 3.8+**
-  - **GitLab Account**: A GitLab account with access to the target project.
-  - **GitLab Personal Access Token**: A [Personal Access Token](https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html) with `api` scope to allow the script to interact with your project.
-  - **Ollama**: An instance of [Ollama](https://ollama.com/) running with a suitable model for code review (e.g., `codellama`, `qwen3-coder`, etc.).
+  - Python 3.8+
+  - A running instance of [Ollama](https://ollama.com/) with a suitable coding model (e.g., `qwen3-coder:30b`, `codellama`, `mistral`).
+  - A GitLab Personal Access Token with `api` scope.
 
 -----
 
-## Installation & Setup
+## Installation
 
-1.  **Clone the Repository**
+1.  **Clone the repository:**
 
     ```bash
     git clone <your-repository-url>
-    cd <your-repository-name>
+    cd <your-repository-directory>
     ```
 
-2.  **Install Dependencies**
+2.  **Install Python dependencies:**
     It's recommended to use a virtual environment.
 
     ```bash
-    # Create and activate a virtual environment (optional but recommended)
     python -m venv venv
-    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
-
-    # Install the required Python packages
+    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
     pip install -r requirements.txt
     ```
+    
+3.  **Configure Environment Variables:**
+    Create a `.env` file in the root of the project directory and add your configuration details.
 
-3.  **Configure Environment Variables**
-    Create a file named `.env` in the root of the project directory and add the following configuration. This file stores your credentials and settings securely.
-
-    ```ini
+    ```env
     # .env file
-
-    # Your GitLab instance URL (e.g., https://gitlab.com)
-    GITLAB_URL="https://gitlab.com"
-
-    # Your GitLab Personal Access Token with API scope
-    PRIVATE_TOKEN="your_private_gitlab_token"
-
-    # The Ollama model to use for the review
-    OLLAMA_MODEL="qwen3-coder:30b"
-
-    # The URL of your running Ollama instance
+    PRIVATE_TOKEN="your_gitlab_personal_access_token"
     OLLAMA_URL="http://localhost:11434"
+    OLLAMA_MODEL="qwen3-coder:30b"
     ```
+
+-----
+
+## Configuration
+
+The script is configured using the following environment variables, which can be placed in a `.env` file:
+
+  - `PRIVATE_TOKEN` ( **Required**): Your GitLab Personal Access Token. You can generate one from your GitLab profile under `Preferences > Access Tokens`. It needs the **`api` scope** to read MRs and post comments.
+  - `OLLAMA_URL` (Optional): The URL for your running Ollama instance. **Defaults to** `http://localhost:11434`.
+  - `OLLAMA_MODEL` (Optional): The name of the model to use from Ollama. **Defaults to** `qwen3-coder:30b`. Ensure the model is downloaded in Ollama (`ollama pull <model_name>`).
 
 -----
 
 ## Usage
 
-Run the script from your terminal, providing the `Project ID` and `Merge Request IID` as arguments.
+Run the script from your terminal, providing the URL of the GitLab Merge Request you want to review.
 
 ### Basic Command
 
 ```bash
-python main.py <PROJECT_ID> <MERGE_REQUEST_IID>
-```
-
-  - `<PROJECT_ID>`: The numeric ID of your project in GitLab. You can find this on the project's main page.
-  - `<MERGE_REQUEST_IID>`: The "internal" ID of the merge request (e.g., `!123`). This is the number you see in the GitLab UI, not the global ID.
-
-### Example
-
-To review merge request `!42` in project `12345`:
-
-```bash
-python main.py 12345 42
+python review-bot.py "https://gitlab.example.com/group/project/-/merge_requests/123"
 ```
 
 ### Dry-Run Mode
 
-To run the script and see the generated review comments in the console without posting them to GitLab, use the `--no-post` flag. This is useful for testing and debugging.
+To generate a review and print it to the console without posting any comments to GitLab, use the `--no-post` flag. This is useful for testing and validation.
 
 ```bash
-python main.py 12345 42 --no-post
+python review-bot.py "https://gitlab.example.com/group/project/-/merge_requests/123" --no-post
 ```
+
+### Arguments
+
+  - `merge_request_url`: (Required) The full URL of the GitLab Merge Request.
+  - `--no-post`: (Optional) A flag to disable posting comments to GitLab.
 
 -----
 
 ## How It Works
 
-The script follows a straightforward process:
+The script follows a logical sequence to perform the code review:
 
-1.  **Initialization**: It parses command-line arguments and loads the configuration from the `.env` file.
-2.  **Fetch MR Data**: It connects to the GitLab API to fetch the merge request's title, diff, and the full content of all changed files.
-3.  **Provide Context to AI**: A "context prompt" containing the MR title, the complete diff, and the contents of the changed files is sent to the Ollama model. This gives the AI a high-level understanding of the changes.
-4.  **Line-by-Line Review**: The script then iterates through each **added** line in the diff.
-5.  **Generate Feedback**: For each added line, it sends a specific prompt to the AI, asking it to review that line within the context of its file.
-6.  **Parse Response**: The AI is expected to respond with a JSON object containing a list of issues. The script parses this response.
-7.  **Post Comments**: For each issue found by the AI, the script posts an inline comment to the corresponding line in the GitLab merge request (unless `--no-post` is enabled).
+1.  **Parse URL**: Extracts the GitLab instance URL, project ID, and MR IID from the provided merge request URL.
+2.  **Fetch Data**: Connects to the GitLab API using your private token to fetch the MR title, diff, and the full content of the changed files.
+3.  **Build Context**: Creates a comprehensive "context prompt" for the AI, including the MR title and the complete diff. This initial prompt helps the AI understand the overall goal of the changes.
+4.  **Send Context**: The context is sent to the Ollama model in a persistent session, so the AI retains this information for subsequent questions.
+5.  **Iterate and Review**: The script processes the diff line by line. For each **added** line of code, it constructs a specific question for the AI, asking it to review that line within the given context.
+6.  **Parse Response**: The AI is prompted to respond in a structured JSON format. The script parses this JSON to identify any issues.
+7.  **Post Comments**: If not in dry-run mode, the script posts any identified issues as inline comments on the corresponding lines in the GitLab MR.
+
+-----
+
+## License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
