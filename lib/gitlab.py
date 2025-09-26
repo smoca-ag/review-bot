@@ -134,6 +134,10 @@ class Gitlab():
         response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
     def post_review(self, issue, old_path, new_path, old_position, new_position):
+        if new_path == "/dev/null":
+            new_path = None
+        if old_path == "/dev/null":
+            old_path = None
         comment_text = f"""**{issue['severity']} / {issue['category']}** : {issue['summary']}
 
 **suggestion** : `{issue['suggestion']} `
@@ -141,8 +145,8 @@ class Gitlab():
 **rationale** : {issue['rationale']}
         """
         position = {
-            "new_path": old_path,
-            "old_path": new_path,
+            "new_path": new_path,
+            "old_path": old_path,
             "base_sha": self.versions[0]["base_commit_sha"],
             "start_sha": self.versions[0]["start_commit_sha"],
             "head_sha": self.versions[0]["head_commit_sha"],
