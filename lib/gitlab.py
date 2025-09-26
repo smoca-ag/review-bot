@@ -130,9 +130,9 @@ class Gitlab():
             "PRIVATE-TOKEN": self.private_token,
             "Content-Type": "application/json"
         }
-
         response = requests.post(url, headers=headers, json=payload)
-        response.raise_for_status()
+        if not response.ok:
+            self.logger.error(f"Error posting inline comment to GitLab: {response}")
     def post_review(self, issue, old_path, new_path, old_position, new_position):
         if new_path == "/dev/null":
             new_path = None

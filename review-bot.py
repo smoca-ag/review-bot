@@ -1,4 +1,3 @@
-import requests
 import sys
 import json
 import os
@@ -74,12 +73,9 @@ def main():
             for issue in json_response.get('issues', []):
                 if not args.no_post:
                     mr_request.post_review(issue, old_path, new_path, old_pos, new_pos)
-
-
         except json.decoder.JSONDecodeError as e:
-            logger.error(f"Error parsing response from GitLab: {e}")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error posting inline comment to GitLab: {e}")
+            logger.error(f"Error loading response json from llm {e}")
+
 
 
     # Post inline comments to GitLab
