@@ -95,12 +95,17 @@ class Gitlab():
             self.logger.error(f"Error posting inline comment to GitLab: {response}")
     def post_review(self, issue, old_path, new_path, old_position, new_position):
 
-
         if new_path == "/dev/null":
             new_path = None
         if old_path == "/dev/null":
             old_path = None
-        if any((discussion['notes'][0]["position"]["new_path"]== new_path and discussion['notes'][0]["position"]["new_line"] == new_position) for discussion in self.discussions):
+        if any(
+                # For discussions that pass the filter, safely access the rest
+                d['notes'][0].get('position', {}).get('new_path') == new_path and
+                d['notes'][0].get('position', {}).get('new_line') == new_position
+                # The filter: only process discussions where 'notes' is a non-empty list
+                for d in self.discussions if d.get('notes')
+        ):
             self.logger.info(f"Already a discussion on path {new_path} and position {new_position}")
             return
 
