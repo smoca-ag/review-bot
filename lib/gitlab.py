@@ -124,7 +124,7 @@ class Gitlab():
             self.logger.error(f"Error fetching file content for '{file_path}': {e}")
             return None
 
-    def post_review_as_inline_comments(self,issue):
+    def post_review_as_inline_comments(self,payload):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         headers = {
             "PRIVATE-TOKEN": self.private_token,
@@ -136,9 +136,9 @@ class Gitlab():
     def post_review(self, issue, old_path, new_path, old_position, new_position):
         comment_text = f"""**{issue['severity']} / {issue['category']}** : {issue['summary']}
 
-        **suggestion** : `{issue['suggestion']} `
+**suggestion** : `{issue['suggestion']} `
 
-        **rationale** : {issue['rationale']}
+**rationale** : {issue['rationale']}
         """
         position = {
             "new_path": old_path,

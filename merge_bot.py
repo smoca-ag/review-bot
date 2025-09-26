@@ -6,14 +6,10 @@ from dotenv import load_dotenv
 import argparse
 import logging
 
-from lib import diff
 from lib.ai import AI
 from lib.gitlab import Gitlab
 from lib.prompts import Prompts
 from lib.diff import process_diff, paths_from_diff
-
-# Load environment variables from .env file
-
 
 def main():
     # Set up command line argument parser
@@ -63,6 +59,7 @@ def main():
     files = mr_request.get_files(paths)
 
     context_prompt = prompts.context_prompt(mr_request.title(), diff_content, files)
+
 
     logger.info(f"Send the context prompt")
     ai_model.question_persistent(context_prompt)
