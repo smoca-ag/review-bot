@@ -27,7 +27,7 @@ Do not provide a review yet. Simply acknowledge that you have received and proce
 {file_content}
 """
     def line_prompt(self, path, position, content):
-        return f"""Review online this code line using the provided context.
+        return f"""Review only this code line using the provided context.
 
 File: `{path}`
 Line: `{position}`
