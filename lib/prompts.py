@@ -39,62 +39,47 @@ Carefully analyze all the provided information.
 
 After you have processed all this information, simply acknowledge that you have received it.
 """
-    def line_prompt(self, path, position, content):
-        return f"""You are a meticulous AI code reviewer. Your goal is to provide precise, actionable, and machine-readable feedback.
 
-Using the full merge request context you just processed, perform a detailed review of the following single line of code. Pay close attention to how this line interacts with the code immediately preceding and following it.
+    def line_prompt(self, path, position, content):
+        return f"""You are a precise AI code reviewer. Your task is to analyze ONLY the following single line of code in isolation.
 
 <path>{path}</path>
 <line>{position}</line>
 <code>{wrap_in_cdata(content.strip())}</code>
-## Review Instructions & Criteria
 
-Analyze the line against the following criteria, in order of importance:
+## Review Criteria (in order of importance):
+1. Correctness & Bugs
+2. Security
+3. Performance
+4. Clarity & Maintainability
+5. Best Practices
 
-1.  **Correctness & Bugs:** Bugs, logic errors, or unhandled edge cases.
-2.  **Security:** Potential vulnerabilities (e.g., injection, data exposure).
-3.  **Performance:** Significant efficiency concerns or bottlenecks.
-4.  **Clarity & Maintainability:** Code that is confusing, hard to read, or difficult to maintain.
-5.  **Best Practices:** Deviations from language idioms, project conventions, or established principles.
+## Output Requirements:
+- Respond only in valid JSON.
+- Return an array of issue objects under the key "issues".
+- Each object must contain:
+   - "category": one of: Correctness, Security, Performance, Clarity, Best Practices
+   - "severity": one of: critical, high, medium, low
+   - "summary": one clear sentence describing the issue.
+   - "suggestion": exact code change (as string).
+   - "rationale": short reason why this fixes or improves it.
 
-## Severity Levels
-
-Classify any issue you find using one of the following levels:
-* **critical:** A definite bug, security vulnerability, or risk of data loss.
-* **high:** A major performance issue, significant security concern, or severe deviation from best practices.
-* **medium:** Suboptimal code, readability issues, or moderate deviation from best practices.
-* **low:** A minor stylistic issue, nitpick, or a small opportunity for improvement.
-
-## Output Format
-
-Provide your review in a valid JSON format. Do not use markdown or any other formatting outside of the JSON structure.
-
-The root object should contain a single key, "issues", which is an array of issue objects. If no issues are found, return an empty array.
-
-Each issue object in the array must have the following structure:
-{{
-  "category": "Correctness|Security|Performance|Clarity|Best Practices",
-  "severity": "critical|high|medium|low",
-  "summary": "A brief, one-sentence description of the issue.",
-  "suggestion": "The suggested code change as a string.",
-  "rationale": "A clear explanation of why the suggestion is an improvement."
-}}
-
-**Example for a line with an issue:**
+## Example Output:
 {{
   "issues": [
-    {{
+   {{
       "category": "Performance",
       "severity": "high",
-      "summary": "The query retrieves all user fields from the database when only the 'name' is needed.",
-      "suggestion": "const user = await db.users.find({{ id: userId }}).select('name');",
-      "rationale": "By selecting only the required fields, you reduce the data transfer size from the database and lower memory consumption, which is critical for tables with many columns."
-    }}
-  ]
+      "summary": "Unnecessary full table scan.",
+      "suggestion": "db.users.find({{ id: userId }}).select('name')",
+      "rationale": "Selecting only required fields reduces memory and network usage."
+   }}
+   ]
 }}
 
-**Example for a line with no issues:**
+If no issues, return:
 {{
   "issues": []
-}}."""
+}}
 
+Do not explain anything beyond the JSON output."""
