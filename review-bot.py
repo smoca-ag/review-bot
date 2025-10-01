@@ -2,6 +2,7 @@ import sys
 import json
 import os
 from enum import Enum
+from importlib.metadata import pass_none
 
 from dotenv import load_dotenv
 import argparse
@@ -60,36 +61,55 @@ def main():
 
     files = mr_request.get_files(paths)
 
-    context_prompt = prompts.context_prompt(mr_request.title(), diff_content, files)
 
 
     logger.info(f"Send the context prompt")
+    context_prompt = prompts.context_prompt(mr_request.title(), diff_content, files)
     ai_model.question_persistent(context_prompt)
 
     logger.info(f"iterate over changes")
+    collected_reviews = []
+
     for change_type, old_pos, new_pos, content, old_path, new_path in process_diff(diff_content):
         logger.info(f"{content}")
         if change_type != "added":
             continue
         if content.strip() == "":
             continue
-        question = prompts.line_prompt(new_path, new_pos, content[1:])
+        code_around = "\n".join(files[new_path].split("\n")[new_pos - 6 : new_pos + 4])
+        question = prompts.line_prompt(new_path, new_pos, content[1:], code_around)
         response = ai_model.question(question)
         try:
             json_response = json.loads(response)
-            if len(json_response.get('issues', [])) == 0:
+            review = json_response.get('review', {})
+            severity = review.get('severity', '')
+            suggestion = review.get('suggestion', '')
+            if severity == "pass" or len(suggestion) == 0:
                 continue
-            logger.warning("".join([log_format_issue(issue) for issue in json_response["issues"]]))
-            for issue in json_response.get('issues', []):
-                if not args.no_post:
-                    mr_request.post_review(issue, old_path, new_path, old_pos, new_pos)
+            logger.warning(f"{suggestion}")
+            collected_reviews.append({"new_path": new_path, "new_pos": new_pos, "review": review})
+
         except json.decoder.JSONDecodeError as e:
             logger.error(f"Error loading response json from LLM: {e} {response}")
-
+    logger.info(f"collected issues {collected_reviews}")
+    question = prompts.consolidatePrompt(collected_reviews)
+    response = ai_model.question(question)
+    json_response = json.loads(response)
+    for review in json_response:
+        try:
+            new_path = review['new_path']
+            new_pos = review['new_pos']
+            review = review['review']
+            suggestion = review.get('suggestion', '')
+            logger.info(f"{new_path} {new_pos} {suggestion}")
+        except KeyError as e:
+            logger.error(f"Error parsing response json from LLM: {e} {review}")
 
     # Post inline comments to GitLab
     if args.no_post:
         logger.info("Review generated but not posted to GitLab (--no-post flag enabled)")
+    else:
+        logger.info(f"post to gitlab (--no-post flag disabled)")
 
 
 if __name__ == "__main__":

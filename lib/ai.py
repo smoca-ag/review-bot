@@ -16,6 +16,5 @@ class AI:
         response = self.client.chat(
             model=self.model,
             messages=[*self.messages, {'role': 'user', 'content': question}],
-            options = {"temperature": 0}
         )['message']['content']
         return response
