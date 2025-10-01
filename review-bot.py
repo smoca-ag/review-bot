@@ -43,13 +43,15 @@ def main():
     logger.addHandler(logging.StreamHandler(sys.stdout))
 
     # Get configuration from environment variables
-    ollama_model = os.getenv('OLLAMA_MODEL', 'qwen3-coder:30b')
-    ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
+    openai_model = os.getenv('OPENAI_MODEL', 'qwen3-coder:30b')
+    openai_url = os.getenv('OPENAI_URL', 'http://localhost:11434/v1')
+    openai_api_key = os.getenv('OPENAI_API_KEY', 'ollama')
+
     spec = args.spec
 
 
     prompts = Prompts(logger)
-    ai_model = AI(ollama_url, ollama_model)
+    ai_model = AI(openai_url, openai_api_key, openai_model)
     mr_request = backendFactory(args.backend)(logger, spec)
     logger.info(f"Load the Merge Request {spec}")
 
@@ -69,13 +71,23 @@ def main():
 
     logger.info(f"iterate over changes")
     collected_reviews = []
+    last_removed_line = ""
 
     for change_type, old_pos, new_pos, content, old_path, new_path in process_diff(diff_content):
         logger.info(f"{content}")
+        if change_type == "deleted":
+            last_removed_line = content
+            continue
         if change_type != "added":
             continue
         if content.strip() == "":
             continue
+        # remove whitespace only changes
+        if last_removed_line.strip() == content[1:].strip():
+            last_removed_line = ""
+            continue
+        last_removed_line = ""
+
         code_around = "\n".join(files[new_path].split("\n")[new_pos - 6 : new_pos + 4])
         question = prompts.line_prompt(new_path, new_pos, content[1:], code_around)
         response = ai_model.question(question)

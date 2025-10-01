@@ -1,9 +1,9 @@
-import ollama
+from openai import OpenAI
 class AI:
-    def __init__(self, ollama_url, ollama_model):
-        self.client = ollama.Client(host=ollama_url)
-        self.model = ollama_model
-        self.messages = []
+    def __init__(self, api_url, api_key, model):
+        self.client = OpenAI(base_url=api_url, api_key=api_key)
+        self.model = model
+        self.messages = [{'role': 'system', 'content':'You are a meticulous AI code reviewer.'}]
 
     def question_persistent(self, question):
         response = self.question(question)
@@ -13,8 +13,9 @@ class AI:
 
 
     def question(self, question):
-        response = self.client.chat(
+        response = self.client.chat.completions.create(
             model=self.model,
             messages=[*self.messages, {'role': 'user', 'content': question}],
-        )['message']['content']
-        return response
+        )
+
+        return response.choices[0].message.content

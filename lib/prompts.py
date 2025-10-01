@@ -43,14 +43,14 @@ After you have processed all this information, simply acknowledge that you have 
 """
 
     def line_prompt(self, path, lineNumber, content, codeAround):
-        return f"""You are a meticulous AI code reviewer. Your goal is to provide precise, actionable, and machine-readable feedback.
+        return f"""You are an expert code review AI assistant. Your goal is to provide precise, actionable, and machine-readable feedback.
 Using the full merge request context you just processed, perform a detailed review of the following single line of code. 
 Pay close attention to how this line interacts with the code immediately preceding and following it.
 
 <path>{path}</path>
 <lineNumber>{lineNumber}</lineNumber>
-<lineOfCodeToReview>{wrap_in_cdata(content)}</lineOfCodeToReview>
 <codeAround>{wrap_in_cdata(codeAround)}</codeAround>
+<lineOfCodeToReview>{wrap_in_cdata(content)}</lineOfCodeToReview>
 
 ## Review Criteria (in order of importance):
 1. Correctness & Bugs
