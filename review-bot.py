@@ -92,7 +92,8 @@ def main():
         question = prompts.line_prompt(new_path, new_pos, content[1:], code_around)
         response = ai_model.question(question)
         try:
-            json_response = json.loads(response)
+
+            json_response = json.loads(ai_model.clean_markdown_code_block(response))
             review = json_response.get('review', {})
             severity = review.get('severity', '')
             suggestion = review.get('suggestion', '')
@@ -106,7 +107,7 @@ def main():
     logger.info(f"collected issues {collected_reviews}")
     question = prompts.consolidatePrompt(collected_reviews)
     response = ai_model.question(question)
-    json_response = json.loads(response)
+    json_response = json.loads(ai_model.clean_markdown_code_block(response))
     for review in json_response:
         try:
             new_path = review['new_path']

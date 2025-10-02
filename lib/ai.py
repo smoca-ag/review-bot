@@ -1,4 +1,6 @@
 from openai import OpenAI
+import re
+
 class AI:
     def __init__(self, api_url, api_key, model):
         self.client = OpenAI(base_url=api_url, api_key=api_key)
@@ -17,5 +19,12 @@ class AI:
             model=self.model,
             messages=[*self.messages, {'role': 'user', 'content': question}],
         )
-
         return response.choices[0].message.content
+
+    def clean_markdown_code_block(self, text):
+        # Remove surrounding triple backticks
+        pattern = r'^```.*?\n(.*?)\n```$'
+        match = re.match(pattern, text, re.DOTALL)
+        if match:
+            return match.group(1)
+        return text

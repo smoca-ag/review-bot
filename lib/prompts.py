@@ -44,7 +44,7 @@ After you have processed all this information, simply acknowledge that you have 
 
     def line_prompt(self, path, lineNumber, content, codeAround):
         return f"""You are an expert code review AI assistant. Your goal is to provide precise, actionable, and machine-readable feedback.
-Using the full merge request context you just processed, perform a detailed review of the following single line of code. 
+Using the full merge request context you just processed and the code around, perform a detailed review of the following single line of code. 
 Pay close attention to how this line interacts with the code immediately preceding and following it.
 
 <path>{path}</path>
@@ -154,15 +154,15 @@ Do not explain anything beyond the JSON output.
 
     def consolidatePrompt(self, review):
         return f"""You are a senior developer reviewing a list of AI-generated code comments. Your task is to refine this list into a final, condensed set of feedback.
-Analyze the provided JSON array of review issues. Remove duplicates, filter out likely false positives, and merge related issues into a single, more insightful comment.
+Analyze the provided JSON array of review issues. Remove duplicates, filter out false positives, and merge related issues into a single, more insightful comment.
 
 **Heuristics for Consolidation:**
 - If multiple issues on adjacent lines point to the same root cause (e.g., repeated lack of input validation), merge them into one comment pointing to the first line of the block.
 - If an issue is a minor style suggestion but the code is functionally correct and clear, consider it a false positive and remove it.
 - Prioritize keeping issues related to correctness, security, and performance over minor best-practice suggestions.
 
-Your final output must be a valid JSON array in the same structure as the input. Do not output markdown.
-
 <review_issues>{wrap_in_cdata(review)}</review_issues>
+
+Output only JSON in the same structure as review_issues.
 
 """
