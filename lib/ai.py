@@ -1,8 +1,10 @@
 from openai import OpenAI
 import re
+import json
 
 class AI:
-    def __init__(self, api_url, api_key, model):
+    def __init__(self, logger, api_url, api_key, model):
+        self.logger = logger
         self.client = OpenAI(base_url=api_url, api_key=api_key)
         self.model = model
         self.messages = [{'role': 'system', 'content':'You are a meticulous AI code reviewer.'}]
@@ -20,6 +22,17 @@ class AI:
             messages=[*self.messages, {'role': 'user', 'content': question}],
         )
         return response.choices[0].message.content
+
+    def question_json(self, question):
+        for i in range(3):
+            try:
+                response = self.question(question)
+                parsed = json.loads(self.clean_markdown_code_block(response))
+                return parsed
+            except json.decoder.JSONDecodeError:
+                continue
+        self.logger.error('Could not parse question JSON')
+        return None
 
     def clean_markdown_code_block(self, text):
         # Remove surrounding triple backticks

@@ -2,7 +2,6 @@ import sys
 import json
 import os
 from enum import Enum
-from importlib.metadata import pass_none
 
 from dotenv import load_dotenv
 import argparse
@@ -17,7 +16,7 @@ from lib.diff import process_diff, paths_from_diff
 class BackendType(Enum):
     GITLAB = "gitlab"
     GIT = "git"
-def backendFactory(backend):
+def backend_factory(backend):
     if backend == BackendType.GIT.value:
         return Git
     else:
@@ -33,7 +32,7 @@ def main():
 
     parser = argparse.ArgumentParser(description='AI Code Review for GitLab Merge Requests')
     parser.add_argument('spec', type=str, help='Full Merge Request url or a argument for git diff')
-    parser.add_argument('--no-post', action='store_true', help='Don\'t post, just show the review')
+    parser.add_argument('--post', action='store_true', help='Post the review directly to the merge request')
     parser.add_argument('--backend', type=str,choices=[backend.value for backend in BackendType], help='which backend to use, default to gitlab')
 
     args = parser.parse_args()
@@ -51,8 +50,8 @@ def main():
 
 
     prompts = Prompts(logger)
-    ai_model = AI(openai_url, openai_api_key, openai_model)
-    mr_request = backendFactory(args.backend)(logger, spec)
+    ai_model = AI(logger, openai_url, openai_api_key, openai_model)
+    mr_request = backend_factory(args.backend)(logger, spec)
     logger.info(f"Load the Merge Request {spec}")
 
     mr_request.load()
@@ -90,25 +89,19 @@ def main():
 
         code_around = "\n".join(files[new_path].split("\n")[new_pos - 6 : new_pos + 4])
         question = prompts.line_prompt(new_path, new_pos, content[1:], code_around)
-        response = ai_model.question(question)
-        try:
+        response = ai_model.question_json(question)
+        review = response.get('review', {})
+        severity = review.get('severity', '')
+        suggestion = review.get('suggestion', '')
+        if severity == "pass" or len(suggestion) == 0:
+            continue
+        logger.warning(f"{suggestion}")
+        collected_reviews.append({"new_path": new_path, "new_pos": new_pos, "review": review})
 
-            json_response = json.loads(ai_model.clean_markdown_code_block(response))
-            review = json_response.get('review', {})
-            severity = review.get('severity', '')
-            suggestion = review.get('suggestion', '')
-            if severity == "pass" or len(suggestion) == 0:
-                continue
-            logger.warning(f"{suggestion}")
-            collected_reviews.append({"new_path": new_path, "new_pos": new_pos, "review": review})
-
-        except json.decoder.JSONDecodeError as e:
-            logger.error(f"Error loading response json from LLM: {e} {response}")
     logger.info(f"collected issues {collected_reviews}")
     question = prompts.consolidatePrompt(collected_reviews)
-    response = ai_model.question(question)
-    json_response = json.loads(ai_model.clean_markdown_code_block(response))
-    for review in json_response:
+    response = ai_model.question_json(question)
+    for review in response:
         try:
             new_path = review['new_path']
             new_pos = review['new_pos']
@@ -119,10 +112,8 @@ def main():
             logger.error(f"Error parsing response json from LLM: {e} {review}")
 
     # Post inline comments to GitLab
-    if args.no_post:
-        logger.info("Review generated but not posted to GitLab (--no-post flag enabled)")
-    else:
-        logger.info(f"post to gitlab (--no-post flag disabled)")
+    if not args.post:
+        logger.info("Review generated but not posted to GitLab (--post flag not enabled)")
 
 
 if __name__ == "__main__":
