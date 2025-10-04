@@ -130,7 +130,7 @@ class Gitlab():
         response = requests.post(url, headers=headers, json=payload)
         if not response.ok:
             self.logger.error(f"Error posting inline comment to GitLab: {response}")
-    def post_review(self, issue, old_path, new_path, old_position, new_position):
+    def post_review(self, text, old_path, new_path, old_position, new_position):
 
         if new_path == "/dev/null":
             new_path = None
@@ -146,12 +146,6 @@ class Gitlab():
             self.logger.info(f"Already a discussion on path {new_path} and position {new_position}")
             return
 
-        comment_text = f"""**{issue['severity']} / {issue['category']}** : {issue['summary']}
-
-**suggestion** : `{issue['suggestion']} `
-
-**rationale** : {issue['rationale']}
-        """
         position = {
             "new_path": new_path,
             "old_path": old_path,
@@ -162,7 +156,7 @@ class Gitlab():
             "new_line": new_position,
             "old_line": old_position
         }
-        payload = {"body": comment_text, "position": position}
+        payload = {"body": text, "position": position}
         self.post_review_as_inline_comments(payload)
 
 

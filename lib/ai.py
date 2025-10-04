@@ -7,7 +7,7 @@ class AI:
         self.logger = logger
         self.client = OpenAI(base_url=api_url, api_key=api_key)
         self.model = model
-        self.messages = [{'role': 'system', 'content':'You are a meticulous AI code reviewer.'}]
+        self.messages = [{'role': 'system', 'content':'You are a helpful assistant.'}]
 
     def question_persistent(self, question):
         response = self.question(question)
@@ -20,6 +20,7 @@ class AI:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[*self.messages, {'role': 'user', 'content': question}],
+            max_tokens=4_000
         )
         return response.choices[0].message.content
 

@@ -1,5 +1,5 @@
 import sys
-import json
+from bs4 import BeautifulSoup
 import os
 from enum import Enum
 
@@ -62,59 +62,30 @@ def main():
 
     files = mr_request.get_files(paths)
 
+    logger.info(f"Send the main prompt")
+    context_prompt = prompts.main_prompt(mr_request.title(), diff_content)
+    response = ai_model.question_persistent(context_prompt)
+
+    logger.info(f"Format the output")
+    output_prompt = prompts.output_prompt()
+    response = ai_model.question_persistent(output_prompt)
+    soup = BeautifulSoup(response, 'html.parser')
+    summary = soup.find('summary').text.strip()
+    conclusion = soup.find('conclusion').text.strip()
+    logger.info(f"summary: {summary}")
+    for finding in soup.find_all('finding'):
+        severity = finding.find('severity').text.strip()
+        category = finding.find('category').text.strip()
+        comment = finding.find('comment').text.strip()
+        line = finding.find('line').text.strip()
+        file = finding.find('file').text.strip()
+        text = f"**{severity}/{category}**: {comment}"
+        logger.info(f"{file}:{line}: {text}")
+        if args.post:
+            mr_request.post_review(text, None, file, None, line)
 
 
-    logger.info(f"Send the context prompt")
-    context_prompt = prompts.context_prompt(mr_request.title(), diff_content, files)
-    ai_model.question_persistent(context_prompt)
-
-    logger.info(f"iterate over changes")
-    collected_reviews = []
-    last_removed_line = ""
-
-    for change_type, old_pos, new_pos, content, old_path, new_path in process_diff(diff_content):
-        logger.info(f"{content}")
-        if change_type == "deleted":
-            last_removed_line = content
-            continue
-        if change_type != "added":
-            continue
-        if content.strip() == "":
-            continue
-        # remove whitespace only changes
-        if last_removed_line.strip() == content[1:].strip():
-            last_removed_line = ""
-            continue
-        last_removed_line = ""
-
-        code_around = "\n".join(files[new_path].split("\n")[new_pos - 6 : new_pos + 4])
-        question = prompts.line_prompt(new_path, new_pos, content[1:], code_around)
-        response = ai_model.question_json(question)
-        review = response.get('review', {})
-        severity = review.get('severity', '')
-        suggestion = review.get('suggestion', '')
-        if severity == "pass" or len(suggestion) == 0:
-            continue
-        logger.warning(f"{suggestion}")
-        collected_reviews.append({"new_path": new_path, "new_pos": new_pos, "review": review})
-
-    logger.info(f"collected issues {collected_reviews}")
-    question = prompts.consolidatePrompt(collected_reviews)
-    response = ai_model.question_json(question)
-    for review in response:
-        try:
-            new_path = review['new_path']
-            new_pos = review['new_pos']
-            review = review['review']
-            suggestion = review.get('suggestion', '')
-            logger.info(f"{new_path} {new_pos} {suggestion}")
-        except KeyError as e:
-            logger.error(f"Error parsing response json from LLM: {e} {review}")
-
-    # Post inline comments to GitLab
-    if not args.post:
-        logger.info("Review generated but not posted to GitLab (--post flag not enabled)")
-
+    logger.info(f"conclusion: {conclusion}")
 
 if __name__ == "__main__":
     main()
