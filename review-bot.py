@@ -63,8 +63,9 @@ def main():
     files = mr_request.get_files(paths)
 
     logger.info(f"Send the main prompt")
-    context_prompt = prompts.main_prompt(mr_request.title(), diff_content)
+    context_prompt = prompts.main_prompt(mr_request.title(), diff_content, files)
     response = ai_model.question_persistent(context_prompt)
+    logger.info(f"Full review response {response}")
 
     logger.info(f"Format the output")
     output_prompt = prompts.output_prompt()

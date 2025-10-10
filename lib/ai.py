@@ -20,7 +20,7 @@ class AI:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[*self.messages, {'role': 'user', 'content': question}],
-            max_tokens=4_000
+            max_tokens=100_000
         )
         return response.choices[0].message.content
 
