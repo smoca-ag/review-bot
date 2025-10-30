@@ -38,7 +38,7 @@ This tool leverages local AI models, via [Ollama](https://ollama.com/), to perfo
     ```bash
     python -m venv venv
     source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-    pip install -r requirements.txt
+    pip install .
     ```
     
 
@@ -52,8 +52,9 @@ This tool leverages local AI models, via [Ollama](https://ollama.com/), to perfo
     GITLAB_API_TOKEN="your_gitlab_personal_access_token"
 
     # Optional Ollama configuration
-    OLLAMA_URL="http://localhost:11434"
-    OLLAMA_MODEL="qwen3-coder:30b"
+    OPENAI_URL="http://localhost:11434/v1"
+    OPENAI_MODEL="qwen3-coder:30b"
+    OPENAI_API_KEY="unused-for-oolama"
     ```
 
 -----
@@ -63,8 +64,9 @@ This tool leverages local AI models, via [Ollama](https://ollama.com/), to perfo
 The script uses the following environment variables:
 
   - `GITLAB_API_TOKEN`: **Required for the `gitlab` backend only.** Your GitLab Personal Access Token. You can generate one from your GitLab profile under `Preferences > Access Tokens`. It needs the **`api` scope** to read MRs and post comments.
-  - `OLLAMA_URL` (Optional): The URL for your running Ollama instance. **Defaults to** `http://localhost:11434`.
-  - `OLLAMA_MODEL` (Optional): The name of the model to use from Ollama. **Defaults to** `qwen3-coder:30b`. Ensure the model is downloaded first (`ollama pull <model_name>`).
+  - `OPENAI_URL` (Optional): The URL for your running Ollama or OpenAPI instance. **Defaults to** `http://localhost:11434/v1`.
+  - `OPENAI_MODEL` (Optional): The name of the model to use. **Defaults to** `qwen3-coder:30b`. Ensure the model is downloaded first (`ollama pull <model_name>`).
+  - `OPENAI_API_KEY` (Optional): API Key if you need one for LLM Access
 
 -----
 

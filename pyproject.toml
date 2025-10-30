@@ -1,0 +1,19 @@
+[project]
+name = "review_bot"
+version = "0.1"
+readme = "Readme.md"
+dependencies = [
+    "python-dotenv",
+    "requests",
+    "openai",
+    "beautifulsoup4"
+]
+
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+review-bot = "review_bot:main"
+
