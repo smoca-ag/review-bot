@@ -93,3 +93,6 @@ def review(spec, backend, post=False):
 
 
     logger.info(f"conclusion: {conclusion}")
+
+if __name__ == '__main__':
+    sys.exit(main())
