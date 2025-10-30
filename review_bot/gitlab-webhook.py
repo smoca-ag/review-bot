@@ -26,17 +26,12 @@ def start_ai_review(mr_id, mr_url):
     It now receives the MR ID and URL directly.
     """
     try:
-        logger.info(f"=== AI REVIEW STARTED for MR !{mr_id} ===")
         logger.info(f"Processing URL: {mr_url}")
-
         # Simulate a long-running task (e.g., API calls, code analysis)
         review(mr_url, BackendType.GITLAB, post=True)
-        logger.info(f"Processing URL: {mr_url}")
-
-        logger.info(f"=== AI REVIEW FINISHED for MR !{mr_id} ===")
-
+        logger.info(f"Finished URL: {mr_url}")
     except Exception as e:
-        logger.error(f"ERROR during AI review for MR !{mr_id}: {e}", exc_info=True)
+        logger.error(f"ERROR during AI review for MR !{mr_url}: {e}", exc_info=True)
 
 
 # --- The Webhook Server Handler ---
