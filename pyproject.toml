@@ -1,7 +1,14 @@
 [project]
 name = "review_bot"
+description = "A simple but using local llms to review code"
 version = "0.1"
 readme = "Readme.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  {name = "David Gunzinger", email = "david.gunzinger@smoca.ch"},
+  {name = "Martin Defuns", email = "martin.defuns@smoca.ch"}
+]
 dependencies = [
     "python-dotenv",
     "requests",
