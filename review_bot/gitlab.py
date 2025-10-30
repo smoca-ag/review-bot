@@ -121,17 +121,8 @@ class Gitlab():
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         return self.get_json_response(url)
 
-    def post_review_as_inline_comments(self,payload):
-        url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
-        headers = {
-            "PRIVATE-TOKEN": self.private_token,
-            "Content-Type": "application/json"
-        }
-        response = requests.post(url, headers=headers, json=payload)
-        if not response.ok:
-            self.logger.error(f"Error posting inline comment to GitLab: {response}")
-    def post_review(self, text, old_path, new_path, old_position, new_position):
 
+    def post_line_review(self, text, old_path, new_path, old_position, new_position):
         if new_path == "/dev/null":
             new_path = None
         if old_path == "/dev/null":
@@ -157,7 +148,25 @@ class Gitlab():
             "old_line": old_position
         }
         payload = {"body": text, "position": position}
-        self.post_review_as_inline_comments(payload)
+        url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
+        headers = {
+            "PRIVATE-TOKEN": self.private_token,
+            "Content-Type": "application/json"
+        }
+        response = requests.post(url, headers=headers, json=payload)
+        if not response.ok:
+            self.logger.error(f"Error posting inline comment to GitLab: {response}")
+    def post_review(self, text):
+        payload = {"body": text}
+        url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/notes"
+        headers = {
+            "PRIVATE-TOKEN": self.private_token,
+            "Content-Type": "application/json"
+        }
+        response = requests.post(url, headers=headers, json=payload)
+        if not response.ok:
+            self.logger.error(f"Error posting mr comment to GitLab: {response}")
+
 
 
 

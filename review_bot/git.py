@@ -21,5 +21,7 @@ class Git():
         for path in paths:
             paths_dict[path] = self.get_file(path)
         return paths_dict
-    def post_review(self, issue, old_path, new_path, old_position, new_position):
+    def post_line_review(self, issue, old_path, new_path, old_position, new_position):
+        pass
+    def post_review(self, text):
         pass

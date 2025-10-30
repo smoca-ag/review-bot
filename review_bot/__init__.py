@@ -89,10 +89,11 @@ def review(spec, backend, post=False):
         text = f"**{severity}/{category}**: {comment}"
         logger.info(f"{file}:{line}: {text}")
         if post:
-            mr_request.post_review(text, None, file, None, line)
+            mr_request.post_line_review(text, None, file, None, line)
 
 
     logger.info(f"conclusion: {conclusion}")
+    mr_request.post_review(conclusion)
 
 if __name__ == '__main__':
     sys.exit(main())
