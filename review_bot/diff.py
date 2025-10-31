@@ -48,8 +48,8 @@ def process_diff(diff_text):
                 old_info = parts[1][1:]  # Remove leading '-'
                 new_info = parts[2][1:]  # Remove leading '+'
 
-                old_start, _ = map(int, old_info.split(','))
-                new_start, _ = map(int, new_info.split(','))
+                old_start = int(old_info.split(',')[0])
+                new_start = int(new_info.split(',')[0])
 
                 old_line_num = old_start
                 new_line_num = new_start
