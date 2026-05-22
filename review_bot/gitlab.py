@@ -159,21 +159,6 @@ class Gitlab(BaseBackend):
 
         subprocess.check_call(["git", "checkout", "mr-head"], cwd=self.repo_dir)
 
-    def get_file(self, file_path):
-        """
-        Fetches the content of a file from the locally cloned repository.
-        """
-        if not hasattr(self, "repo_dir"):
-            return None
-
-        full_path = os.path.join(self.repo_dir, file_path)
-        try:
-            with open(full_path, "r") as f:
-                return f.read()
-        except Exception as e:
-            self.logger.error(f"Error reading file {file_path} from local repo: {e}")
-            return None
-
     def get_discussion(self):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         return self.get_json_response(url)
