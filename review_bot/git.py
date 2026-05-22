@@ -1,7 +1,11 @@
 import os
 import subprocess
 
+from opentelemetry import trace
+
 from review_bot.base_backend import BaseBackend
+
+tracer = trace.get_tracer(__name__)
 
 
 class Git(BaseBackend):
