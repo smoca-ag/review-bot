@@ -204,6 +204,25 @@ def scan_code(ctx: RunContext[ReviewDeps], pattern: str, path: str = ".") -> str
         return f"Error scanning code: {str(e)}"
 
 
+@reviewer_agent.tool
+def execute_command(ctx: RunContext[ReviewDeps], command: str) -> str:
+    """Execute a shell command inside a sandboxed container with the repository mounted.
+
+    This is useful for running linters, tests, or build scripts to verify the code.
+    The repository is mounted at the current working directory.
+
+    Args:
+        command: The shell command to execute (e.g., 'pytest tests/', 'flake8 .').
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔧 Tool Executing: execute_command(command='{command}')")
+    try:
+        return ctx.deps.mr_request.execute_command(command)
+    except Exception as e:
+        logger.error(f"❌ Tool Error executing command: {str(e)}")
+        return f"Error executing command: {str(e)}"
+
+
 # ==========================================
 # Review Logic
 # ==========================================
@@ -217,81 +236,85 @@ def review(spec, backend, post=False):
     logger.info(f"Load the Merge Request {spec}")
 
     mr_request.load()
+    mr_request.setup_container()
 
-    diff_content = mr_request.diff()
+    try:
+        diff_content = mr_request.diff()
 
-    mr_description = mr_request.description() or "No description provided."
+        mr_description = mr_request.description() or "No description provided."
 
-    secure_prompt = (
-        f"Review the following Merge Request details:\n\n"
-        f"### MR TITLE:\n<title>\n{wrap_in_cdata(mr_request.title())}\n</title>\n\n"
-        f"### MR DESCRIPTION:\n<description>\n{wrap_in_cdata(mr_description)}\n</description>\n\n"
-        f"### CODE DIFF:\n<untrusted_diff>\n{wrap_in_cdata(diff_content)}\n</untrusted_diff>"
-    )
-
-    logger.info("🚀 Sending prompt to agent...")
-
-    deps = ReviewDeps(mr_request=mr_request, mr_description=mr_description)
-
-    result = reviewer_agent.run_sync(secure_prompt, deps=deps)
-    review_result: ReviewResult = result.output
-
-    logger.info("🏁 Agent execution completed.")
-
-    logger.info("Formatting and posting review...")
-
-    status_icon = "✅" if review_result.recommend_approval else "❌"
-    header_identifier = "# 🤖 AI Review"
-
-    desc_status = []
-    desc_status.append(
-        "✅ Explains the 'what'"
-        if review_result.has_purpose
-        else "❌ Missing the 'what' (description of change)"
-    )
-    desc_status.append(
-        "✅ Includes Test Plan"
-        if review_result.has_test_plan
-        else "❌ Missing Test Plan"
-    )
-    desc_status_str = "\n".join(f"- {s}" for s in desc_status)
-
-    markdown_comment = f"{header_identifier} {status_icon}\n"
-    markdown_comment += f"## Summary\n{review_result.summary}\n\n"
-    markdown_comment += f"## Description Quality\n{desc_status_str}\n"
-
-    if review_result.description_feedback:
-        markdown_comment += (
-            "\n**Description Improvements Needed:**\n"
-            + "\n".join(f"- {f}" for f in review_result.description_feedback)
-            + "\n\n"
+        secure_prompt = (
+            f"Review the following Merge Request details:\n\n"
+            f"### MR TITLE:\n<title>\n{wrap_in_cdata(mr_request.title())}\n</title>\n\n"
+            f"### MR DESCRIPTION:\n<description>\n{wrap_in_cdata(mr_description)}\n</description>\n\n"
+            f"### CODE DIFF:\n<untrusted_diff>\n{wrap_in_cdata(diff_content)}\n</untrusted_diff>"
         )
 
-    if review_result.security_concerns:
-        markdown_comment += (
-            "## 🚨 Security Concerns\n"
-            + "\n".join(f"- {c}" for c in review_result.security_concerns)
-            + "\n\n"
+        logger.info("🚀 Sending prompt to agent...")
+
+        deps = ReviewDeps(mr_request=mr_request, mr_description=mr_description)
+
+        result = reviewer_agent.run_sync(secure_prompt, deps=deps)
+        review_result: ReviewResult = result.output
+
+        logger.info("🏁 Agent execution completed.")
+
+        logger.info("Formatting and posting review...")
+
+        status_icon = "✅" if review_result.recommend_approval else "❌"
+        header_identifier = "# 🤖 AI Review"
+
+        desc_status = []
+        desc_status.append(
+            "✅ Explains the 'what'"
+            if review_result.has_purpose
+            else "❌ Missing the 'what' (description of change)"
         )
-
-    if review_result.actionable_feedback:
-        markdown_comment += "## 🛠️ Code Feedback\n" + "\n".join(
-            f"- {f}" for f in review_result.actionable_feedback
+        desc_status.append(
+            "✅ Includes Test Plan"
+            if review_result.has_test_plan
+            else "❌ Missing Test Plan"
         )
+        desc_status_str = "\n".join(f"- {s}" for s in desc_status)
 
-    logger.info(markdown_comment)
+        markdown_comment = f"{header_identifier} {status_icon}\n"
+        markdown_comment += f"## Summary\n{review_result.summary}\n\n"
+        markdown_comment += f"## Description Quality\n{desc_status_str}\n"
 
-    # Post line-by-line comments
-    for comment in review_result.line_comments:
-        text = f"**{comment.severity}/{comment.category}**: {comment.comment}"
-        logger.info(f"{comment.file}:{comment.line}: {text}")
-        if post:
-            mr_request.post_line_review(
-                text, None, comment.file, None, str(comment.line)
+        if review_result.description_feedback:
+            markdown_comment += (
+                "\n**Description Improvements Needed:**\n"
+                + "\n".join(f"- {f}" for f in review_result.description_feedback)
+                + "\n\n"
             )
 
-    if post:
-        mr_request.post_review(markdown_comment)
-        logger.info("🎉 Review posted successfully!")
-    else:
-        logger.info("Review generated but not posted (--post not specified).")
+        if review_result.security_concerns:
+            markdown_comment += (
+                "## 🚨 Security Concerns\n"
+                + "\n".join(f"- {c}" for c in review_result.security_concerns)
+                + "\n\n"
+            )
+
+        if review_result.actionable_feedback:
+            markdown_comment += "## 🛠️ Code Feedback\n" + "\n".join(
+                f"- {f}" for f in review_result.actionable_feedback
+            )
+
+        logger.info(markdown_comment)
+
+        # Post line-by-line comments
+        for comment in review_result.line_comments:
+            text = f"**{comment.severity}/{comment.category}**: {comment.comment}"
+            logger.info(f"{comment.file}:{comment.line}: {text}")
+            if post:
+                mr_request.post_line_review(
+                    text, None, comment.file, None, str(comment.line)
+                )
+
+        if post:
+            mr_request.post_review(markdown_comment)
+            logger.info("🎉 Review posted successfully!")
+        else:
+            logger.info("Review generated but not posted (--post not specified).")
+    finally:
+        mr_request.cleanup_container()

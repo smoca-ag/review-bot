@@ -38,8 +38,12 @@ def extract_gitlab_info(url):
     return [f"{protocol}://{host}", quote(project_path, safe=""), int(mr_id)]
 
 
-class Gitlab:
+from review_bot.base_backend import BaseBackend
+
+
+class Gitlab(BaseBackend):
     def __init__(self, logger, url):
+        super().__init__()
         self.logger = logger
         [self.gitlab_url, self.project_id, self.merge_request_iid] = (
             extract_gitlab_info(url)
@@ -154,34 +158,6 @@ class Gitlab:
             )
 
         subprocess.check_call(["git", "checkout", "mr-head"], cwd=self.repo_dir)
-
-    def list_files(self, path="."):
-        if not hasattr(self, "repo_dir"):
-            return "Repository not fetched locally."
-        import subprocess
-
-        try:
-            output = subprocess.check_output(
-                ["ls", "-la", path], cwd=self.repo_dir, text=True
-            )
-            return output
-        except subprocess.CalledProcessError as e:
-            return f"Error listing files: {e}"
-
-    def scan_code(self, pattern, path="."):
-        if not hasattr(self, "repo_dir"):
-            return "Repository not fetched locally."
-        import subprocess
-
-        try:
-            output = subprocess.check_output(
-                ["git", "grep", "-n", pattern, path], cwd=self.repo_dir, text=True
-            )
-            return output
-        except subprocess.CalledProcessError as e:
-            if e.returncode == 1:
-                return "No matches found."
-            return f"Error scanning code: {e}"
 
     def get_file(self, file_path):
         """
