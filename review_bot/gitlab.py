@@ -68,7 +68,6 @@ class Gitlab:
     def description(self):
         return self.mr.get("description", "")
 
-
     def get_versions(self):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/versions"
         return self.get_json_response(url)
@@ -186,20 +185,16 @@ class Gitlab:
 
     def get_file(self, file_path):
         """
-        Fetches the content of a file from the locally cloned repository at the MR head commit.
+        Fetches the content of a file from the locally cloned repository.
         """
         if not hasattr(self, "repo_dir"):
             return None
-        import subprocess
 
+        full_path = os.path.join(self.repo_dir, file_path)
         try:
-            # We use git show to get the file content at the current checked out commit (mr-head)
-            # This avoids issues if the file was deleted or only exists in the MR
-            output = subprocess.check_output(
-                ["git", "show", f"HEAD:{file_path}"], cwd=self.repo_dir, text=True
-            )
-            return output
-        except subprocess.CalledProcessError as e:
+            with open(full_path, "r") as f:
+                return f.read()
+        except Exception as e:
             self.logger.error(f"Error reading file {file_path} from local repo: {e}")
             return None
 
