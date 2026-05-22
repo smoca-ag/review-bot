@@ -1,9 +1,9 @@
+import base64
 import os
+import urllib
+from urllib.parse import quote, urlparse
 
 import requests
-import urllib
-import base64
-from urllib.parse import urlparse, quote
 
 
 def extract_gitlab_info(url):
@@ -16,50 +16,57 @@ def extract_gitlab_info(url):
     host = parsed_url.netloc
 
     # Extract project path and merge request id
-    path_parts = parsed_url.path.split('/')
+    path_parts = parsed_url.path.split("/")
 
     # Find the project path (from first non-empty part until before "-/merge_requests")
     project_parts = []
     for i in range(1, len(path_parts)):  # Start from index 1 (after first empty string)
-        if path_parts[i] == '-':
+        if path_parts[i] == "-":
             break
         if path_parts[i]:  # Skip empty strings
             project_parts.append(path_parts[i])
 
-    project_path = '/'.join(project_parts)
+    project_path = "/".join(project_parts)
 
     # Extract merge request id
     mr_id = None
     for i in range(len(path_parts)):
-        if path_parts[i] == 'merge_requests' and i + 1 < len(path_parts):
+        if path_parts[i] == "merge_requests" and i + 1 < len(path_parts):
             mr_id = path_parts[i + 1]
             break
 
-    return [f"{protocol}://{host}", quote(project_path, safe=''), int(mr_id)]
+    return [f"{protocol}://{host}", quote(project_path, safe=""), int(mr_id)]
 
-class Gitlab():
+
+class Gitlab:
     def __init__(self, logger, url):
         self.logger = logger
-        [self.gitlab_url, self.project_id, self.merge_request_iid] = extract_gitlab_info(url)
+        [self.gitlab_url, self.project_id, self.merge_request_iid] = (
+            extract_gitlab_info(url)
+        )
         if not self.gitlab_url:
-            raise ValueError("Error: GitLab URL must be provided (https://gitlab.example.com/example-group/example-project/-/merge_requests/19)")
-        self.private_token = os.getenv('GITLAB_API_TOKEN')
+            raise ValueError(
+                "Error: GitLab URL must be provided (https://gitlab.example.com/example-group/example-project/-/merge_requests/19)"
+            )
+        self.private_token = os.getenv("GITLAB_API_TOKEN")
         if not self.private_token:
             raise ValueError("Error: GITLAB_API_TOKEN environment variable is not set")
+
     def load(self):
         self.versions = self.get_versions()
         self.discussions = self.get_discussion()
         self.diff_response = self.get_merge_request_diff()
         self.mr = self.get_mr()
+        self.fetch_repository()
 
     def diff(self):
         return self.diff_response
 
     def title(self):
-        return self.mr.get('title', '')
+        return self.mr.get("title", "")
 
     def description(self):
-        return self.mr.get('description', '')
+        return self.mr.get("description", "")
 
     def get_files(self, paths):
         paths_dict = {}
@@ -71,11 +78,8 @@ class Gitlab():
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/versions"
         return self.get_json_response(url)
 
-
     def get_json_response(self, url):
-        headers = {
-            "PRIVATE-TOKEN": self.private_token
-        }
+        headers = {"PRIVATE-TOKEN": self.private_token}
         response = requests.get(url, headers=headers)
         if not response.ok:
             self.logger.error(f"Error fetching {url}: {response}")
@@ -83,9 +87,7 @@ class Gitlab():
         return response.json()
 
     def get_text_response(self, url):
-        headers = {
-            "PRIVATE-TOKEN": self.private_token
-        }
+        headers = {"PRIVATE-TOKEN": self.private_token}
         response = requests.get(url, headers=headers)
         if not response.ok:
             self.logger.error(f"Error fetching {url}: {response}")
@@ -97,32 +99,118 @@ class Gitlab():
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/raw_diffs"
         return self.get_text_response(url)
 
-
     def get_mr(self):
         # Construct the API endpoint
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}"
         return self.get_json_response(url)
 
+    def get_project(self):
+        url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}"
+        return self.get_json_response(url)
+
+    def fetch_repository(self):
+        import subprocess
+        import tempfile
+        import urllib.parse
+
+        self.repo_dir = tempfile.mkdtemp()
+
+        project = self.get_project()
+        if not project or "http_url_to_repo" not in project:
+            self.logger.error("Could not get project details for cloning.")
+            return
+
+        repo_url = project["http_url_to_repo"]
+        parsed = urllib.parse.urlparse(repo_url)
+        clone_url = parsed._replace(
+            netloc=f"oauth2:{self.private_token}@{parsed.netloc}"
+        ).geturl()
+
+        subprocess.check_call(["git", "init", self.repo_dir])
+        subprocess.check_call(
+            ["git", "remote", "add", "origin", clone_url], cwd=self.repo_dir
+        )
+
+        # Fetch the merge request head
+        subprocess.check_call(
+            [
+                "git",
+                "fetch",
+                "--depth",
+                "1",
+                "origin",
+                f"refs/merge-requests/{self.merge_request_iid}/head:mr-head",
+            ],
+            cwd=self.repo_dir,
+        )
+
+        # Fetch the target branch (base)
+        target_branch = self.mr.get("target_branch")
+        if target_branch:
+            subprocess.check_call(
+                [
+                    "git",
+                    "fetch",
+                    "--depth",
+                    "1",
+                    "origin",
+                    f"refs/heads/{target_branch}:target-branch",
+                ],
+                cwd=self.repo_dir,
+            )
+
+        subprocess.check_call(["git", "checkout", "mr-head"], cwd=self.repo_dir)
+
+    def list_files(self, path="."):
+        if not hasattr(self, "repo_dir"):
+            return "Repository not fetched locally."
+        import subprocess
+
+        try:
+            output = subprocess.check_output(
+                ["ls", "-la", path], cwd=self.repo_dir, text=True
+            )
+            return output
+        except subprocess.CalledProcessError as e:
+            return f"Error listing files: {e}"
+
+    def scan_code(self, pattern, path="."):
+        if not hasattr(self, "repo_dir"):
+            return "Repository not fetched locally."
+        import subprocess
+
+        try:
+            output = subprocess.check_output(
+                ["git", "grep", "-n", pattern, path], cwd=self.repo_dir, text=True
+            )
+            return output
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 1:
+                return "No matches found."
+            return f"Error scanning code: {e}"
 
     def get_file(self, file_path):
         """
-        Fetches the content of a file from GitLab at a specific commit.
+        Fetches the content of a file from the locally cloned repository at the MR head commit.
         """
-        commit_sha = self.versions[0]["head_commit_sha"]
-        # URL-encode the file path to handle special characters
-        encoded_file_path = urllib.parse.quote_plus(file_path)
-        url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/repository/files/{encoded_file_path}?ref={commit_sha}"
-        response = self.get_json_response(url)
-        if not response:
+        if not hasattr(self, "repo_dir"):
             return None
-        content_base64 = response['content']
-        decoded_content = base64.b64decode(content_base64).decode('utf-8')
-        return decoded_content
+        import subprocess
+
+        try:
+            # We use git show to get the file content at the current checked out commit (mr-head)
+            # This avoids issues if the file was deleted or only exists in the MR
+            output = subprocess.check_output(
+                ["git", "show", f"HEAD:{file_path}"], cwd=self.repo_dir, text=True
+            )
+            return output
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Error reading file {file_path} from local repo: {e}")
+            return None
 
     def get_discussion(self):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         return self.get_json_response(url)
-
 
     def post_line_review(self, text, old_path, new_path, old_position, new_position):
         if new_path == "/dev/null":
@@ -130,13 +218,16 @@ class Gitlab():
         if old_path == "/dev/null":
             old_path = None
         if any(
-                # For discussions that pass the filter, safely access the rest
-                d['notes'][0].get('position', {}).get('new_path') == new_path and
-                d['notes'][0].get('position', {}).get('new_line') == new_position
-                # The filter: only process discussions where 'notes' is a non-empty list
-                for d in self.discussions if d.get('notes')
+            # For discussions that pass the filter, safely access the rest
+            d["notes"][0].get("position", {}).get("new_path") == new_path
+            and d["notes"][0].get("position", {}).get("new_line") == new_position
+            # The filter: only process discussions where 'notes' is a non-empty list
+            for d in self.discussions
+            if d.get("notes")
         ):
-            self.logger.info(f"Already a discussion on path {new_path} and position {new_position}")
+            self.logger.info(
+                f"Already a discussion on path {new_path} and position {new_position}"
+            )
             return
 
         position = {
@@ -147,23 +238,24 @@ class Gitlab():
             "head_sha": self.versions[0]["head_commit_sha"],
             "position_type": "text",
             "new_line": new_position,
-            "old_line": old_position
+            "old_line": old_position,
         }
         payload = {"body": text, "position": position}
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         headers = {
             "PRIVATE-TOKEN": self.private_token,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
         response = requests.post(url, headers=headers, json=payload)
         if not response.ok:
             self.logger.error(f"Error posting inline comment to GitLab: {response}")
+
     def post_review(self, text):
         payload = {"body": text}
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/notes"
         headers = {
             "PRIVATE-TOKEN": self.private_token,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
         response = requests.post(url, headers=headers, json=payload)
         if not response.ok:

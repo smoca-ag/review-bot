@@ -135,7 +135,7 @@ reviewer_agent = Agent(
         "5.  **Best Practices:** Does the code adhere to established language, framework, and project-specific conventions? Acknowledge positive aspects where best practices are followed well, explaining why they are good practices. Cite specific principles (e.g., SOLID, DRY) or style guides (e.g., PEP 8) when relevant.\n"
         "6.  **Provide a Conclusive Summary:** To wrap up your review, provide a comprehensive summary of your findings. Reiterate the most critical action items and provide a final recommendation on whether the change is ready to be merged, needs minor revisions, or requires significant rework.\n\n"
         "DESCRIPTION ANALYSIS REQUIREMENTS:\n"
-        "You MUST strictly evaluate the MR description. A good PR must include:\n"
+        "You MUST strictly evaluate the MR description. A good MR must include:\n"
         "1. The 'what': A clear description of the change.\n"
         "2. The 'how': A test description or test plan.\n"
         "If the description is missing either of these, or if the diff contains major changes (like schema updates) "
@@ -157,8 +157,7 @@ def fetch_file_content(ctx: RunContext[ReviewDeps], file_path: str) -> str:
     logger = logging.getLogger(__name__)
     logger.info(f"🔧 Tool Executing: fetch_file_content(file_path='{file_path}')")
     try:
-        files = ctx.deps.mr_request.get_files([file_path])
-        content = files.get(file_path)
+        content = ctx.deps.mr_request.get_file(file_path)
         if content is None:
             error_msg = f"Error: File '{file_path}' not found."
             logger.warning(f"⚠️ Tool Warning: {error_msg}")
@@ -170,6 +169,39 @@ def fetch_file_content(ctx: RunContext[ReviewDeps], file_path: str) -> str:
     except Exception as e:
         logger.error(f"❌ Tool Error fetching '{file_path}': {str(e)}")
         return f"Error fetching file: {str(e)}"
+
+
+@reviewer_agent.tool
+def list_files(ctx: RunContext[ReviewDeps], path: str = ".") -> str:
+    """List files in the repository at the given path.
+
+    Args:
+        path: The directory path to list files from. Default is root ('.').
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔧 Tool Executing: list_files(path='{path}')")
+    try:
+        return ctx.deps.mr_request.list_files(path)
+    except Exception as e:
+        logger.error(f"❌ Tool Error listing '{path}': {str(e)}")
+        return f"Error listing files: {str(e)}"
+
+
+@reviewer_agent.tool
+def scan_code(ctx: RunContext[ReviewDeps], pattern: str, path: str = ".") -> str:
+    """Scan the repository for a regex pattern.
+
+    Args:
+        pattern: The regex pattern to search for.
+        path: Optional directory path to restrict the search. Default is root ('.').
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔧 Tool Executing: scan_code(pattern='{pattern}', path='{path}')")
+    try:
+        return ctx.deps.mr_request.scan_code(pattern, path)
+    except Exception as e:
+        logger.error(f"❌ Tool Error scanning for '{pattern}' in '{path}': {str(e)}")
+        return f"Error scanning code: {str(e)}"
 
 
 # ==========================================
@@ -189,7 +221,7 @@ def review(spec, backend, post=False):
     diff_content = mr_request.diff()
 
     mr_description = mr_request.description() or "No description provided."
-    logger.info(f"MR Description {wrap_in_cdata(mr_description)}")
+
     secure_prompt = (
         f"Review the following Merge Request details:\n\n"
         f"### MR TITLE:\n<title>\n{wrap_in_cdata(mr_request.title())}\n</title>\n\n"
