@@ -13,6 +13,8 @@ class Git():
         return diff
     def title(self):
         return ""
+    def description(self):
+        return ""
     def get_file(self,path):
         with open(path, 'r') as file:
             return file.read()

@@ -56,8 +56,10 @@ class Gitlab():
         return self.diff_response
 
     def title(self):
-        return self.mr['title']
+        return self.mr.get('title', '')
 
+    def description(self):
+        return self.mr.get('description', '')
 
     def get_files(self, paths):
         paths_dict = {}
@@ -166,8 +168,3 @@ class Gitlab():
         response = requests.post(url, headers=headers, json=payload)
         if not response.ok:
             self.logger.error(f"Error posting mr comment to GitLab: {response}")
-
-
-
-
-

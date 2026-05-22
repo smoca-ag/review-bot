@@ -13,7 +13,11 @@ dependencies = [
     "python-dotenv",
     "requests",
     "openai",
-    "beautifulsoup4"
+    "beautifulsoup4",
+    "pydantic_ai",
+    "pydantic-ai-slim[anthropic]",
+    "pydantic-ai-slim[web-fetch]",
+    "opentelemetry-sdk"
 ]
 
 
@@ -24,4 +28,3 @@ build-backend = "setuptools.build_meta"
 [project.scripts]
 review-bot = "review_bot:main"
 review-bot-gitlab-webhook = "review_bot.gitlab_webhook:main"
-
