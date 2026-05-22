@@ -17,6 +17,7 @@ dependencies = [
     "pydantic_ai",
     "pydantic-ai-slim[anthropic]",
     "pydantic-ai-slim[web-fetch]",
+    "pydantic-ai-slim[duckduckgo]",
     "opentelemetry-sdk"
 ]
 
