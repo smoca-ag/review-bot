@@ -68,11 +68,6 @@ class Gitlab:
     def description(self):
         return self.mr.get("description", "")
 
-    def get_files(self, paths):
-        paths_dict = {}
-        for path in paths:
-            paths_dict[path] = self.get_file(path)
-        return paths_dict
 
     def get_versions(self):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/versions"
