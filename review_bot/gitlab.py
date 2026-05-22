@@ -1,9 +1,9 @@
-import base64
 import os
-import urllib
 from urllib.parse import quote, urlparse
 
 import requests
+
+from review_bot.base_backend import BaseBackend
 
 
 def extract_gitlab_info(url):
@@ -36,13 +36,6 @@ def extract_gitlab_info(url):
             break
 
     return [f"{protocol}://{host}", quote(project_path, safe=""), int(mr_id)]
-
-
-from opentelemetry import trace
-
-from review_bot.base_backend import BaseBackend
-
-tracer = trace.get_tracer(__name__)
 
 
 class Gitlab(BaseBackend):
@@ -111,30 +104,44 @@ class Gitlab(BaseBackend):
         return self.get_json_response(url)
 
     def fetch_repository(self):
-        with tracer.start_as_current_span("Gitlab.fetch_repository"):
-            import subprocess
-            import tempfile
-            import urllib.parse
+        import subprocess
+        import tempfile
+        import urllib.parse
 
-            self.repo_dir = tempfile.mkdtemp()
+        self.repo_dir = tempfile.mkdtemp()
 
-            project = self.get_project()
-            if not project or "http_url_to_repo" not in project:
-                self.logger.error("Could not get project details for cloning.")
-                return
+        project = self.get_project()
+        if not project or "http_url_to_repo" not in project:
+            self.logger.error("Could not get project details for cloning.")
+            return
 
-            repo_url = project["http_url_to_repo"]
-            parsed = urllib.parse.urlparse(repo_url)
-            clone_url = parsed._replace(
-                netloc=f"oauth2:{self.private_token}@{parsed.netloc}"
-            ).geturl()
+        repo_url = project["http_url_to_repo"]
+        parsed = urllib.parse.urlparse(repo_url)
+        clone_url = parsed._replace(
+            netloc=f"oauth2:{self.private_token}@{parsed.netloc}"
+        ).geturl()
 
-            subprocess.check_call(["git", "init", self.repo_dir])
-            subprocess.check_call(
-                ["git", "remote", "add", "origin", clone_url], cwd=self.repo_dir
-            )
+        subprocess.check_call(["git", "init", self.repo_dir])
+        subprocess.check_call(
+            ["git", "remote", "add", "origin", clone_url], cwd=self.repo_dir
+        )
 
-            # Fetch the merge request head
+        # Fetch the merge request head
+        subprocess.check_call(
+            [
+                "git",
+                "fetch",
+                "--depth",
+                "1",
+                "origin",
+                f"refs/merge-requests/{self.merge_request_iid}/head:mr-head",
+            ],
+            cwd=self.repo_dir,
+        )
+
+        # Fetch the target branch (base)
+        target_branch = self.mr.get("target_branch")
+        if target_branch:
             subprocess.check_call(
                 [
                     "git",
@@ -142,27 +149,12 @@ class Gitlab(BaseBackend):
                     "--depth",
                     "1",
                     "origin",
-                    f"refs/merge-requests/{self.merge_request_iid}/head:mr-head",
+                    f"refs/heads/{target_branch}:target-branch",
                 ],
                 cwd=self.repo_dir,
             )
 
-            # Fetch the target branch (base)
-            target_branch = self.mr.get("target_branch")
-            if target_branch:
-                subprocess.check_call(
-                    [
-                        "git",
-                        "fetch",
-                        "--depth",
-                        "1",
-                        "origin",
-                        f"refs/heads/{target_branch}:target-branch",
-                    ],
-                    cwd=self.repo_dir,
-                )
-
-            subprocess.check_call(["git", "checkout", "mr-head"], cwd=self.repo_dir)
+        subprocess.check_call(["git", "checkout", "mr-head"], cwd=self.repo_dir)
 
     def get_discussion(self):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
