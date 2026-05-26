@@ -317,11 +317,11 @@ def review(spec, backend, post=False):
                 if review_result.has_test_plan
                 else "❌ Missing Test Plan"
             )
-            desc_status_str = "\n".join(f"- {s}" for s in desc_status)
+            #desc_status_str = "\n".join(f"- {s}" for s in desc_status)
 
             markdown_comment = f"{header_identifier} {status_icon}\n"
-            markdown_comment += f"## Summary\n{review_result.summary}\n\n"
-            markdown_comment += f"## Description Quality\n{desc_status_str}\n"
+            #markdown_comment += f"## Summary\n{review_result.summary}\n\n"
+            #markdown_comment += f"## Description Quality\n{desc_status_str}\n"
 
             if review_result.description_feedback:
                 markdown_comment += (
@@ -346,6 +346,9 @@ def review(spec, backend, post=False):
 
             # Post line-by-line comments
             for comment in review_result.line_comments:
+                if comment.severity.lower() == "info":
+                     continue
+
                 text = f"**{comment.severity}/{comment.category}**: {comment.comment}"
                 logger.info(f"{comment.file}:{comment.line}: {text}")
                 if post:

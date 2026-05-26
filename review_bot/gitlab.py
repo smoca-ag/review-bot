@@ -213,16 +213,74 @@ class Gitlab(BaseBackend):
             self.logger.error(f"Error posting inline draft note to GitLab: {response}")
 
     def post_review(self, text):
-        # Using the standard /notes endpoint instead of /draft_notes
-        payload = {"body": text}
-        url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/notes"
         headers = {
             "PRIVATE-TOKEN": self.private_token,
             "Content-Type": "application/json",
         }
-        response = requests.post(url, headers=headers, json=payload)
-        if not response.ok:
-            self.logger.error(f"Error posting general MR note to GitLab: {response.status_code}")
+
+        # 1. Get current user
+        user_url = f"{self.gitlab_url}/api/v4/user"
+        user_resp = requests.get(
+            user_url, headers={"PRIVATE-TOKEN": self.private_token}
+        )
+        if not user_resp.ok:
+            self.logger.error("Could not fetch current user info")
+            return
+
+        current_user_id = user_resp.json().get("id")
+
+        # 2. Get existing notes
+        notes_url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/notes"
+        notes_resp = requests.get(
+            notes_url,
+            headers={"PRIVATE-TOKEN": self.private_token},
+            params={"per_page": 100},
+        )
+
+        existing_notes = []
+        if notes_resp.ok:
+            for note in notes_resp.json():
+                if (
+                    not note.get("system")
+                    and note.get("author", {}).get("id") == current_user_id
+                ):
+                    # Filter out inline comments (DiffNote)
+                    if note.get("type") != "DiffNote":
+                        existing_notes.append(note)
+
+        # 3. Update or post
+        if existing_notes:
+            # Update the first one
+            note_to_update = existing_notes[0]
+            update_url = f"{notes_url}/{note_to_update['id']}"
+            update_resp = requests.put(update_url, headers=headers, json={"body": text})
+            if not update_resp.ok:
+                self.logger.error(
+                    f"Error updating general MR note: {update_resp.status_code}"
+                )
+            else:
+                self.logger.info("Successfully updated existing general MR note.")
+
+            # Delete the rest
+            for note in existing_notes[1:]:
+                delete_url = f"{notes_url}/{note['id']}"
+                del_resp = requests.delete(
+                    delete_url, headers={"PRIVATE-TOKEN": self.private_token}
+                )
+                if not del_resp.ok:
+                    self.logger.error(
+                        f"Error deleting old general MR note: {del_resp.status_code}"
+                    )
+        else:
+            # Post new
+            payload = {"body": text}
+            response = requests.post(notes_url, headers=headers, json=payload)
+            if not response.ok:
+                self.logger.error(
+                    f"Error posting general MR note to GitLab: {response.status_code}"
+                )
+            else:
+                self.logger.info("Successfully posted new general MR note.")
 
     def publish_reviews(self):
         """
@@ -270,5 +328,9 @@ class Gitlab(BaseBackend):
             if pub_resp.ok:
                 self.logger.info(f"Successfully published draft note {note_id}.")
             else:
-                self.logger.error(f"FAILED to publish draft note {note_id}. Status: {pub_resp.status_code}")
-                self.logger.error(f"Problematic note position data: {note.get('position', 'No position data found')}")
+                self.logger.error(
+                    f"FAILED to publish draft note {note_id}. Status: {pub_resp.status_code}"
+                )
+                self.logger.error(
+                    f"Problematic note position data: {note.get('position', 'No position data found')}"
+                )
