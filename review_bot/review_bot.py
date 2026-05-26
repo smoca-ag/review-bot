@@ -70,7 +70,7 @@ def inject_line_numbers(diff_text: str) -> str:
     for line in diff_text.splitlines():
         if line.startswith('@@ '):
             # Extract the starting line number for the new file chunk
-            match = re.search(r'@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@', line)
+            match = re.search(r'@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)?(?: @@|\s.*)', line)
             if match:
                 current_new_line = int(match.group(1))
             result.append(line)
@@ -346,7 +346,7 @@ def review(spec, backend, post=False):
 
             # Post line-by-line comments
             for comment in review_result.line_comments:
-                if comment.severity.lower() == "info":
+                if comment.severity and comment.severity.lower() == 'info':
                      continue
 
                 text = f"**{comment.severity}/{comment.category}**: {comment.comment}"
