@@ -101,7 +101,7 @@ class BaseBackend:
         except subprocess.CalledProcessError as e:
             return f"Command failed with exit code {e.returncode}:\n{e.output}"
 
-    def cleanup_container(self):
+    def cleanup(self):
         if getattr(self, "container_name", None):
             try:
                 subprocess.check_call(

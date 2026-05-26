@@ -156,6 +156,22 @@ class Gitlab(BaseBackend):
 
         subprocess.check_call(["git", "checkout", "mr-head"], cwd=self.repo_dir)
 
+    def cleanup(self):
+        import shutil
+
+        if getattr(self, "repo_dir", None):
+            try:
+                shutil.rmtree(self.repo_dir)
+                if hasattr(self, "logger"):
+                    self.logger.info(f"Cleaned up repo directory: {self.repo_dir}")
+            except Exception as e:
+                if hasattr(self, "logger"):
+                    self.logger.error(f"Failed to clean up repo directory: {e}")
+            finally:
+                self.repo_dir = None
+
+        super().cleanup()
+
     def get_discussion(self):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         return self.get_json_response(url)

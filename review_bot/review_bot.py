@@ -115,7 +115,7 @@ reviewer_agent = Agent(
     output_type=ReviewResult,
     capabilities=[
         Thinking(effort="high"),
-        WebSearch(builtin=False), # will default to a local setup automatically
+        WebSearch(builtin=False),  # will default to a local setup automatically
         WebFetch(builtin=False),  # will default to a local setup automatically
     ],
     system_prompt=(
@@ -322,4 +322,4 @@ def review(spec, backend, post=False):
             else:
                 logger.info("Review generated but not posted (--post not specified).")
         finally:
-            mr_request.cleanup_container()
+            mr_request.cleanup()
