@@ -8,9 +8,32 @@ class BaseBackend:
         self.repo_dir = None
         self.container_name = None
 
+    def _is_safe_path(self, target_path: str) -> bool:
+        """
+        Validates that the provided path resolves strictly within the repo_dir.
+        Prevents directory traversal (e.g., '../') and absolute path escapes.
+        """
+        if not self.repo_dir:
+            return False
+
+        base_dir = os.path.abspath(self.repo_dir)
+        # os.path.join ignores base_dir if target_path is an absolute path (e.g., '/etc')
+        full_path = os.path.abspath(os.path.join(base_dir, target_path))
+
+        try:
+            # commonpath checks if the resolved path is a child of the base directory
+            return os.path.commonpath([base_dir, full_path]) == base_dir
+        except ValueError:
+            # commonpath raises ValueError if paths are on different drives (e.g., Windows)
+            return False
+
     def list_files(self, path="."):
         if not self.repo_dir:
             return "Repository not fetched locally."
+
+        if not self._is_safe_path(path):
+            return "Error: Invalid or restricted path."
+
         try:
             output = subprocess.check_output(
                 ["ls", "-la", path], cwd=self.repo_dir, text=True
@@ -22,6 +45,10 @@ class BaseBackend:
     def scan_code(self, pattern, path="."):
         if not self.repo_dir:
             return "Repository not fetched locally."
+
+        if not self._is_safe_path(path):
+            return "Error: Invalid or restricted path."
+
         try:
             output = subprocess.check_output(
                 ["git", "grep", "-n", pattern, path], cwd=self.repo_dir, text=True
@@ -37,6 +64,11 @@ class BaseBackend:
         Fetches the content of a file from the locally cloned repository.
         """
         if not getattr(self, "repo_dir", None):
+            return None
+
+        if not self._is_safe_path(file_path):
+            if hasattr(self, "logger"):
+                self.logger.error(f"Unauthorized file access attempt: {file_path}")
             return None
 
         full_path = os.path.join(self.repo_dir, file_path)
@@ -70,6 +102,7 @@ class BaseBackend:
                 "run",
                 "-d",
                 "--rm",
+                "--cap-drop=ALL",
                 "--name",
                 self.container_name,
                 "-v",
@@ -100,6 +133,15 @@ class BaseBackend:
             return f"Error: Command timed out after {timeout} seconds."
         except subprocess.CalledProcessError as e:
             return f"Command failed with exit code {e.returncode}:\n{e.output}"
+
+    def publish_reviews(self):
+        pass
+
+    def post_line_review(self, text, old_path, new_path, old_position, new_position):
+        pass
+
+    def post_review(self, text):
+        pass
 
     def cleanup(self):
         if getattr(self, "container_name", None):

@@ -321,6 +321,7 @@ def review(spec, backend, post=False):
 
             if post:
                 mr_request.post_review(markdown_comment)
+                mr_request.publish_reviews()
                 logger.info("🎉 Review posted successfully!")
             else:
                 logger.info("Review generated but not posted (--post not specified).")
