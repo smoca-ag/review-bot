@@ -1,27 +1,34 @@
+import os
 import subprocess
 
+from opentelemetry import trace
 
-class Git():
+from review_bot.base_backend import BaseBackend
+
+tracer = trace.get_tracer(__name__)
+
+
+class Git(BaseBackend):
     def __init__(self, logger, url):
+        super().__init__()
         self.url = url
+        self.logger = logger
+        self.repo_dir = os.path.abspath(".")
+
     def load(self):
         pass
+
     def diff(self):
         [code, diff] = subprocess.getstatusoutput(f"git diff  {self.url}")
         if code != 0:
             raise Exception(diff)
         return diff
+
     def title(self):
         return ""
-    def get_file(self,path):
-        with open(path, 'r') as file:
-            return file.read()
-    def get_files(self, paths):
-        paths_dict = {}
-        for path in paths:
-            paths_dict[path] = self.get_file(path)
-        return paths_dict
+
+    def description(self):
+        return ""
+
     def post_line_review(self, issue, old_path, new_path, old_position, new_position):
-        pass
-    def post_review(self, text):
         pass

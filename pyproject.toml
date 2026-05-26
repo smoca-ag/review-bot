@@ -10,10 +10,12 @@ authors = [
   {name = "Martin Defuns", email = "martin.defuns@smoca.ch"}
 ]
 dependencies = [
-    "python-dotenv",
-    "requests",
-    "openai",
-    "beautifulsoup4"
+    "python-dotenv==1.2.2",
+    "requests==2.33.1",
+    "openai==2.36.0",
+    "beautifulsoup4==4.14.3",
+    "pydantic_ai==1.92.0",
+    "opentelemetry-sdk==1.39.1"
 ]
 
 
@@ -24,4 +26,3 @@ build-backend = "setuptools.build_meta"
 [project.scripts]
 review-bot = "review_bot:main"
 review-bot-gitlab-webhook = "review_bot.gitlab_webhook:main"
-
