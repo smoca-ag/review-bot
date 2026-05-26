@@ -54,9 +54,12 @@ def wrap_in_cdata(text: str) -> str:
     """
     if not isinstance(text, str):
         text = str(text)
-    # Replace ]]>, which terminates CDATA sections
+
+    # Replace ]]>, which terminates CDATA sections, by splitting the CDATA block
     safe_text = text.replace("]]>", "]]]]><![CDATA[>")
-    return f"<![CDATA[\n{safe_text}\n]]>"
+
+    # Return without injecting newlines to preserve the original text exactly
+    return f"<![CDATA[{safe_text}]]>"
 
 
 # ==========================================
