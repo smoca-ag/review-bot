@@ -16,7 +16,6 @@ from opentelemetry.sdk.trace.export import (
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import Thinking, WebFetch, WebSearch
-from pydantic_ai.models.openai import OpenAIModel
 
 import review_bot
 
@@ -116,8 +115,8 @@ reviewer_agent = Agent(
     output_type=ReviewResult,
     capabilities=[
         Thinking(effort="high"),
-        WebSearch(builtin=False),
-        WebFetch(builtin=False),
+        WebSearch(builtin=False), # will default to a local setup automatically
+        WebFetch(builtin=False),  # will default to a local setup automatically
     ],
     system_prompt=(
         "You are an expert code review agent. Your goal is to provide an exceptionally thorough, detailed, constructive, and helpful code review. Your review should be comprehensive, leaving no stone unturned.\n\n"
@@ -314,7 +313,7 @@ def review(spec, backend, post=False):
                 logger.info(f"{comment.file}:{comment.line}: {text}")
                 if post:
                     mr_request.post_line_review(
-                        text, None, comment.file, None, str(comment.line)
+                        text, None, comment.file, None, comment.line
                     )
 
             if post:
