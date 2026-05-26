@@ -10,15 +10,15 @@ authors = [
   {name = "Martin Defuns", email = "martin.defuns@smoca.ch"}
 ]
 dependencies = [
-    "python-dotenv",
-    "requests",
-    "openai",
-    "beautifulsoup4",
-    "pydantic_ai",
-    "pydantic-ai-slim[anthropic]",
-    "pydantic-ai-slim[web-fetch]",
-    "pydantic-ai-slim[duckduckgo]",
-    "opentelemetry-sdk"
+    "python-dotenv==1.2.2",
+    "requests==2.33.1",
+    "openai==2.36.0",
+    "beautifulsoup4==4.14.3",
+    "pydantic_ai==1.92.0",
+    "pydantic-ai-slim[anthropic]==1.92.0",
+    "pydantic-ai-slim[web-fetch]==1.92.0",
+    "pydantic-ai-slim[duckduckgo]==1.92.0",
+    "opentelemetry-sdk==1.39.1"
 ]
 
 
