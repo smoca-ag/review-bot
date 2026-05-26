@@ -63,31 +63,26 @@ class BaseBackend:
             return
 
         self.container_name = f"review-bot-{uuid.uuid4().hex[:8]}"
-        try:
-            abs_repo_dir = os.path.abspath(self.repo_dir)
-            subprocess.check_call(
-                [
-                    "podman",
-                    "run",
-                    "-d",
-                    "--rm",
-                    "--name",
-                    self.container_name,
-                    "-v",
-                    f"{abs_repo_dir}:/workspace",
-                    "-w",
-                    "/workspace",
-                    image,
-                    "sleep",
-                    "infinity",
-                ]
-            )
-            if hasattr(self, "logger"):
-                self.logger.info(f"Started Podman container: {self.container_name}")
-        except subprocess.CalledProcessError as e:
-            if hasattr(self, "logger"):
-                self.logger.error(f"Failed to start container: {e}")
-            self.container_name = None
+        abs_repo_dir = os.path.abspath(self.repo_dir)
+        subprocess.check_call(
+            [
+                "podman",
+                "run",
+                "-d",
+                "--rm",
+                "--name",
+                self.container_name,
+                "-v",
+                f"{abs_repo_dir}:/workspace",
+                "-w",
+                "/workspace",
+                image,
+                "sleep",
+                "infinity",
+            ]
+        )
+        if hasattr(self, "logger"):
+            self.logger.info(f"Started Podman container: {self.container_name}")
 
     def execute_command(self, command: str, timeout: int = 60) -> str:
         if not getattr(self, "container_name", None):
