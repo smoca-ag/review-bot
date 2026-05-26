@@ -59,9 +59,10 @@ class BaseBackend:
                 return "No matches found."
             return f"Error scanning code: {e}"
 
-    def get_file(self, file_path):
+    def get_file(self, file_path, include_line_numbers=True):
         """
         Fetches the content of a file from the locally cloned repository.
+        Optionally prepends line numbers for LLM context.
         """
         if not getattr(self, "repo_dir", None):
             return None
@@ -74,7 +75,18 @@ class BaseBackend:
         full_path = os.path.join(self.repo_dir, file_path)
         try:
             with open(full_path, "r") as f:
-                return f.read()
+                content = f.read()
+
+            # Inject line numbers if requested by the LLM tool
+            if include_line_numbers:
+                numbered_lines = [
+                    f"{i + 1:4d} | {line}"
+                    for i, line in enumerate(content.splitlines())
+                ]
+                return "\n".join(numbered_lines)
+
+            return content
+
         except Exception as e:
             if hasattr(self, "logger"):
                 self.logger.error(

@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -61,6 +62,39 @@ def wrap_in_cdata(text: str) -> str:
     # Return without injecting newlines to preserve the original text exactly
     return f"<![CDATA[{safe_text}]]>"
 
+def inject_line_numbers(diff_text: str) -> str:
+    """Adds explicit new-file line numbers to a unified diff."""
+    result = []
+    current_new_line = None
+
+    for line in diff_text.splitlines():
+        if line.startswith('@@ '):
+            # Extract the starting line number for the new file chunk
+            match = re.search(r'@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)?(?: @@|\s.*)', line)
+            if match:
+                current_new_line = int(match.group(1))
+            result.append(line)
+        elif line.startswith('---') or line.startswith('+++'):
+            result.append(line)
+        elif line.startswith('+'):
+            if current_new_line is not None:
+                # Prefix the line number (e.g., "  45 | + new code")
+                result.append(f"{current_new_line:4d} | {line}")
+                current_new_line += 1
+            else:
+                result.append(line)
+        elif line.startswith('-'):
+            # Removed lines don't exist in the new file, so we don't count them
+            result.append(line)
+        else:
+            # Context lines (unchanged code)
+            if current_new_line is not None and not line.startswith(('diff ', 'index ')):
+                result.append(f"{current_new_line:4d} | {line}")
+                current_new_line += 1
+            else:
+                result.append(line)
+
+    return '\n'.join(result)
 
 # ==========================================
 # Dependencies & Schema
@@ -131,7 +165,7 @@ reviewer_agent = Agent(
         '3.  **Execute the Review:** Execute your plan step-by-step. For each point in your review plan, provide a detailed analysis. Your feedback should be **highly actionable and deeply constructive**. Frame your comments collaboratively (e.g., use "we" or ask questions to provoke thought). For every suggestion you make, provide a code example of the improved implementation. Your line-by-line comments should be exhaustive.\n\n'
         "## Review Criteria (in order of importance):\n"
         "1.  **Correctness & Bugs:** Does the code do what it's supposed to do? Does it introduce any bugs or handle edge cases properly? Elaborate on potential edge cases and how the current code would handle them. If you find a bug, describe the exact steps to reproduce it.\n"
-        "2.  **Security:** Does the change introduce any security vulnerabilities (e.g., XSS, SQL injection, insecure handling of credentials)? For every potential vulnerability, explain the attack vector in detail and provide a secure code example for mitigation.\n"
+        "2.  **Security:** Does the change introduce any security vulnerabilities (e.g., XSS, SQL injection, insecure handling of credentials)? How would you hack the code inside a CTF ? For every potential vulnerability, explain the attack vector in detail and provide a secure code example for mitigation.\n"
         "3.  **Performance:** Does the code negatively impact performance? Are there obvious optimizations that can be made without sacrificing clarity? Quantify the potential performance impact where possible and provide optimized code snippets.\n"
         "4.  **Clarity & Maintainability:** Is the code easy to understand, modify, and test? Are variable names clear? Is the logic straightforward? Suggest alternative names and structures with clear justifications for why they improve maintainability.\n"
         "5.  **Best Practices:** Does the code adhere to established language, framework, and project-specific conventions? Acknowledge positive aspects where best practices are followed well, explaining why they are good practices. Cite specific principles (e.g., SOLID, DRY) or style guides (e.g., PEP 8) when relevant.\n"
@@ -255,7 +289,7 @@ def review(spec, backend, post=False):
                 f"Review the following Merge Request details:\n\n"
                 f"### MR TITLE:\n<title>\n{wrap_in_cdata(mr_request.title())}\n</title>\n\n"
                 f"### MR DESCRIPTION:\n<description>\n{wrap_in_cdata(mr_description)}\n</description>\n\n"
-                f"### CODE DIFF:\n<untrusted_diff>\n{wrap_in_cdata(diff_content)}\n</untrusted_diff>"
+                f"### CODE DIFF:\n<untrusted_diff>\n{wrap_in_cdata(inject_line_numbers(diff_content))}\n</untrusted_diff>"
             )
 
             logger.info("🚀 Sending prompt to agent...")
@@ -283,11 +317,11 @@ def review(spec, backend, post=False):
                 if review_result.has_test_plan
                 else "❌ Missing Test Plan"
             )
-            desc_status_str = "\n".join(f"- {s}" for s in desc_status)
+            #desc_status_str = "\n".join(f"- {s}" for s in desc_status)
 
             markdown_comment = f"{header_identifier} {status_icon}\n"
-            markdown_comment += f"## Summary\n{review_result.summary}\n\n"
-            markdown_comment += f"## Description Quality\n{desc_status_str}\n"
+            #markdown_comment += f"## Summary\n{review_result.summary}\n\n"
+            #markdown_comment += f"## Description Quality\n{desc_status_str}\n"
 
             if review_result.description_feedback:
                 markdown_comment += (
@@ -312,6 +346,9 @@ def review(spec, backend, post=False):
 
             # Post line-by-line comments
             for comment in review_result.line_comments:
+                if comment.severity and comment.severity.lower() == 'info':
+                     continue
+
                 text = f"**{comment.severity}/{comment.category}**: {comment.comment}"
                 logger.info(f"{comment.file}:{comment.line}: {text}")
                 if post:
