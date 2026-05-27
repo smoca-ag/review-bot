@@ -296,10 +296,11 @@ class Gitlab(BaseBackend):
             self.logger.error(
                 f"Error bulk-publishing draft notes to GitLab: {response.text}"
             )
+            self.publish_individually()
         else:
             self.logger.info("Successfully published all draft notes.")
 
-    def _debug_publish_individually(self):
+    def publish_individually(self):
         """
         Fetches all pending draft notes and publishes them one by one via PUT.
         """
@@ -331,6 +332,7 @@ class Gitlab(BaseBackend):
                 self.logger.error(
                     f"FAILED to publish draft note {note_id}. Status: {pub_resp.status_code}"
                 )
+                requests.delete(pub_url, headers=headers)
                 self.logger.error(
                     f"Problematic note position data: {note.get('position', 'No position data found')}"
                 )
