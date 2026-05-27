@@ -8,6 +8,15 @@ class BaseBackend:
         self.repo_dir = None
         self.container_name = None
 
+    def load(self):
+        pass
+
+    def is_open(self) -> bool:
+        """
+        Returns True if the merge request is open and eligible for review.
+        """
+        return True
+
     def _is_safe_path(self, target_path: str) -> bool:
         """
         Validates that the provided path resolves strictly within the repo_dir.

@@ -93,6 +93,11 @@ class Gitlab(BaseBackend):
         self.logger.error("Could not fetch current user info")
         return None
 
+    def is_open(self) -> bool:
+        if not hasattr(self, "mr") or not self.mr:
+            return False
+        return self.mr.get("state") == "opened"
+
     def diff(self):
         return self.diff_response
 

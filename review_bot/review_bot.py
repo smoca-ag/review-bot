@@ -62,39 +62,43 @@ def wrap_in_cdata(text: str) -> str:
     # Return without injecting newlines to preserve the original text exactly
     return f"<![CDATA[{safe_text}]]>"
 
+
 def inject_line_numbers(diff_text: str) -> str:
     """Adds explicit new-file line numbers to a unified diff."""
     result = []
     current_new_line = None
 
     for line in diff_text.splitlines():
-        if line.startswith('@@ '):
+        if line.startswith("@@ "):
             # Extract the starting line number for the new file chunk
-            match = re.search(r'@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)?(?: @@|\s.*)', line)
+            match = re.search(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)?(?: @@|\s.*)", line)
             if match:
                 current_new_line = int(match.group(1))
             result.append(line)
-        elif line.startswith('---') or line.startswith('+++'):
+        elif line.startswith("---") or line.startswith("+++"):
             result.append(line)
-        elif line.startswith('+'):
+        elif line.startswith("+"):
             if current_new_line is not None:
                 # Prefix the line number (e.g., "  45 | + new code")
                 result.append(f"{current_new_line:4d} | {line}")
                 current_new_line += 1
             else:
                 result.append(line)
-        elif line.startswith('-'):
+        elif line.startswith("-"):
             # Removed lines don't exist in the new file, so we don't count them
             result.append(line)
         else:
             # Context lines (unchanged code)
-            if current_new_line is not None and not line.startswith(('diff ', 'index ')):
+            if current_new_line is not None and not line.startswith(
+                ("diff ", "index ")
+            ):
                 result.append(f"{current_new_line:4d} | {line}")
                 current_new_line += 1
             else:
                 result.append(line)
 
-    return '\n'.join(result)
+    return "\n".join(result)
+
 
 # ==========================================
 # Dependencies & Schema
@@ -278,6 +282,11 @@ def review(spec, backend, post=False):
         logger.info(f"Load the Merge Request {spec}")
 
         mr_request.load()
+
+        if not mr_request.is_open():
+            logger.info("Merge Request is not open. Skipping review.")
+            return
+
         mr_request.setup_container()
 
         try:
@@ -317,11 +326,11 @@ def review(spec, backend, post=False):
                 if review_result.has_test_plan
                 else "❌ Missing Test Plan"
             )
-            #desc_status_str = "\n".join(f"- {s}" for s in desc_status)
+            # desc_status_str = "\n".join(f"- {s}" for s in desc_status)
 
             markdown_comment = f"{header_identifier} {status_icon}\n"
-            #markdown_comment += f"## Summary\n{review_result.summary}\n\n"
-            #markdown_comment += f"## Description Quality\n{desc_status_str}\n"
+            # markdown_comment += f"## Summary\n{review_result.summary}\n\n"
+            # markdown_comment += f"## Description Quality\n{desc_status_str}\n"
 
             if review_result.description_feedback:
                 markdown_comment += (
@@ -346,8 +355,8 @@ def review(spec, backend, post=False):
 
             # Post line-by-line comments
             for comment in review_result.line_comments:
-                if comment.severity and comment.severity.lower() == 'info':
-                     continue
+                if comment.severity and comment.severity.lower() == "info":
+                    continue
 
                 text = f"**{comment.severity}/{comment.category}**: {comment.comment}"
                 logger.info(f"{comment.file}:{comment.line}: {text}")

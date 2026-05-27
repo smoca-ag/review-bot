@@ -182,6 +182,11 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
             return
 
         attributes = data.get("object_attributes", {})
+        mr_state = attributes.get("state")
+        if mr_state != "opened":
+            logger.info(f"Ignoring MR in state: {mr_state}")
+            return
+
         mr_action = attributes.get("action")
         if mr_action not in ["open", "update", "reopen"]:
             logger.info(f"Ignoring MR action: {mr_action}")
