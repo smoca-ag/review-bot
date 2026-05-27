@@ -54,11 +54,44 @@ class Gitlab(BaseBackend):
             raise ValueError("Error: GITLAB_API_TOKEN environment variable is not set")
 
     def load(self):
+        self.current_user_id = self.get_current_user_id()
         self.versions = self.get_versions()
         self.discussions = self.get_discussion()
+        self.draft_notes = self.get_draft_notes() or []
+        self.clear_existing_draft_notes()
         self.diff_response = self.get_merge_request_diff()
         self.mr = self.get_mr()
         self.fetch_repository()
+
+    def clear_existing_draft_notes(self):
+        if not self.draft_notes:
+            return
+        base_url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
+        headers = {"PRIVATE-TOKEN": self.private_token}
+        for note in self.draft_notes:
+            if note.get("author", {}).get("id") == self.current_user_id:
+                note_id = note.get("id")
+                del_url = f"{base_url}/{note_id}"
+                resp = requests.delete(del_url, headers=headers)
+                if not resp.ok:
+                    self.logger.error(f"Failed to delete stale draft note {note_id}")
+
+        # Keep only draft notes from other users
+        self.draft_notes = [
+            n
+            for n in self.draft_notes
+            if n.get("author", {}).get("id") != self.current_user_id
+        ]
+
+    def get_current_user_id(self):
+        user_url = f"{self.gitlab_url}/api/v4/user"
+        user_resp = requests.get(
+            user_url, headers={"PRIVATE-TOKEN": self.private_token}
+        )
+        if user_resp.ok:
+            return user_resp.json().get("id")
+        self.logger.error("Could not fetch current user info")
+        return None
 
     def diff(self):
         return self.diff_response
@@ -172,6 +205,10 @@ class Gitlab(BaseBackend):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         return self.get_json_response(url)
 
+    def get_draft_notes(self):
+        url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
+        return self.get_json_response(url)
+
     def post_line_review(self, text, old_path, new_path, old_position, new_position):
         if new_path == "/dev/null":
             new_path = None
@@ -179,14 +216,34 @@ class Gitlab(BaseBackend):
             old_path = None
 
         # Ensure we aren't doubling up on discussions
+        def get_pos(note):
+            pos = note.get("position")
+            return pos if pos is not None else {}
+
         if any(
-            d["notes"][0].get("position", {}).get("new_path") == new_path
-            and d["notes"][0].get("position", {}).get("new_line") == new_position
+            get_pos(d["notes"][0]).get("new_path") == new_path
+            and get_pos(d["notes"][0]).get("new_line") == new_position
+            and d["notes"][0].get("author", {}).get("id") == self.current_user_id
             for d in self.discussions
             if d.get("notes")
         ):
             self.logger.info(
-                f"Already a discussion on path {new_path} and position {new_position}"
+                f"Already a discussion by the bot on path {new_path} and position {new_position}"
+            )
+            return
+
+        # Ensure we aren't doubling up on draft notes
+        if any(
+            get_pos(note).get("new_path") == new_path
+            and get_pos(note).get("new_line") == new_position
+            and (
+                note.get("author", {}).get("id") == self.current_user_id
+                or "author" not in note
+            )
+            for note in self.draft_notes
+        ):
+            self.logger.info(
+                f"Already a draft note by the bot on path {new_path} and position {new_position}"
             )
             return
 
@@ -211,6 +268,8 @@ class Gitlab(BaseBackend):
         response = requests.post(url, headers=headers, json=payload)
         if not response.ok:
             self.logger.error(f"Error posting inline draft note to GitLab: {response}")
+        else:
+            self.draft_notes.append(payload)
 
     def post_review(self, text):
         headers = {
@@ -218,16 +277,17 @@ class Gitlab(BaseBackend):
             "Content-Type": "application/json",
         }
 
-        # 1. Get current user
-        user_url = f"{self.gitlab_url}/api/v4/user"
-        user_resp = requests.get(
-            user_url, headers={"PRIVATE-TOKEN": self.private_token}
-        )
-        if not user_resp.ok:
-            self.logger.error("Could not fetch current user info")
-            return
-
-        current_user_id = user_resp.json().get("id")
+        current_user_id = self.current_user_id
+        if not current_user_id:
+            # Fallback if load() didn't get it
+            user_url = f"{self.gitlab_url}/api/v4/user"
+            user_resp = requests.get(
+                user_url, headers={"PRIVATE-TOKEN": self.private_token}
+            )
+            if not user_resp.ok:
+                self.logger.error("Could not fetch current user info")
+                return
+            current_user_id = user_resp.json().get("id")
 
         # 2. Get existing notes
         notes_url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/notes"
