@@ -187,6 +187,13 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
             logger.info(f"Ignoring MR in state: {mr_state}")
             return
 
+        is_draft = attributes.get("work_in_progress", False) or attributes.get(
+            "draft", False
+        )
+        if is_draft:
+            logger.info("Ignoring Draft/WIP MR.")
+            return
+
         mr_action = attributes.get("action")
         if mr_action not in ["open", "update", "reopen"]:
             logger.info(f"Ignoring MR action: {mr_action}")

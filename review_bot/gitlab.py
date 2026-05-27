@@ -98,6 +98,11 @@ class Gitlab(BaseBackend):
             return False
         return self.mr.get("state") == "opened"
 
+    def is_draft(self) -> bool:
+        if not hasattr(self, "mr") or not self.mr:
+            return False
+        return self.mr.get("work_in_progress", False) or self.mr.get("draft", False)
+
     def diff(self):
         return self.diff_response
 

@@ -17,6 +17,12 @@ class BaseBackend:
         """
         return True
 
+    def is_draft(self) -> bool:
+        """
+        Returns True if the merge request is a draft/WIP.
+        """
+        return False
+
     def _is_safe_path(self, target_path: str) -> bool:
         """
         Validates that the provided path resolves strictly within the repo_dir.

@@ -287,6 +287,10 @@ def review(spec, backend, post=False):
             logger.info("Merge Request is not open. Skipping review.")
             return
 
+        if mr_request.is_draft():
+            logger.info("Merge Request is a Draft/WIP. Skipping review.")
+            return
+
         mr_request.setup_container()
 
         try:
