@@ -358,7 +358,6 @@ def review(spec, backend, post=False):
             logger.info(markdown_comment)
 
             # Post line-by-line comments
-            mr_request.clear_existing_draft_notes()
             for comment in review_result.line_comments:
                 if comment.severity and comment.severity.lower() == "info":
                     continue
