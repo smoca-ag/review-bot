@@ -75,56 +75,26 @@ class BaseBackend:
             return "Error: No active container found."
 
         try:
-            # Detect file type inside the container; read as hex for binary, text for text
-            file_check = subprocess.check_output(
-                [
-                    "podman",
-                    "exec",
-                    self.container_name,
-                    "sh",
-                    "-c",
-                    f"file -b --mime-type '{file_path}'",
-                ],
-                text=True,
-                timeout=10,
-            ).strip()
-
-            if "binary" in file_check or file_check.startswith("application/"):
-                # Binary: read as hex dump to preserve bytes
-                hex_output = subprocess.check_output(
-                    [
-                        "podman",
-                        "exec",
-                        self.container_name,
-                        "sh",
-                        "-c",
-                        f"xxd -p '{file_path}' | tr -d '\\n'",
-                    ],
-                    text=True,
-                    timeout=30,
-                ).strip()
-                return bytes.fromhex(hex_output)
-
-            # Text file
+            # Read file as bytes directly
             output = subprocess.check_output(
                 [
                     "podman",
                     "exec",
                     self.container_name,
-                    "sh",
-                    "-c",
-                    f"cat '{file_path}'",
+                    "cat",
+                    file_path,
                 ],
-                text=True,
+                stderr=subprocess.STDOUT,
                 timeout=30,
             )
             return output
         except subprocess.TimeoutExpired:
             return "Error: Command timed out after 30 seconds."
         except subprocess.CalledProcessError as e:
-            if "No such file" in e.output or "cannot access" in e.output:
+            error_msg = e.output.decode("utf-8", errors="replace")
+            if "No such file" in error_msg or "cannot access" in error_msg:
                 return None
-            return f"Error reading file {file_path}: {e.output.strip()}"
+            return f"Error reading file {file_path}: {error_msg.strip()}"
 
     def setup_container(self, image="python:3.11"):
         if not getattr(self, "repo_dir", None):
