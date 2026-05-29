@@ -4,6 +4,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from datetime import date
 from typing import Literal
 
 import dotenv
@@ -34,7 +35,9 @@ dotenv.load_dotenv()
 
 openai_url = os.getenv("OPENAI_URL", "http://localhost:11434/v1")
 openai_api_key = os.getenv("OPENAI_API_KEY", "unused")
-model_name = os.getenv("ANTHROPIC_DEFAULT_OPUS_MODEL") or os.getenv("OPENAI_MODEL", "qwen3-coder:30b")
+model_name = os.getenv("ANTHROPIC_DEFAULT_OPUS_MODEL") or os.getenv(
+    "OPENAI_MODEL", "qwen3-coder:30b"
+)
 
 if os.getenv("ANTHROPIC_DEFAULT_OPUS_MODEL"):
     model = f"anthropic:{model_name}"
@@ -74,7 +77,9 @@ def inject_line_numbers(diff_text: str) -> str:
         elif line.startswith("-"):
             result.append(line)
         else:
-            if current_new_line is not None and not line.startswith(("diff ", "index ")):
+            if current_new_line is not None and not line.startswith(
+                ("diff ", "index ")
+            ):
                 result.append(f"{current_new_line:4d} | {line}")
                 current_new_line += 1
             else:
@@ -94,53 +99,70 @@ class ReviewDeps:
 class LineComment(BaseModel):
     file: str = Field(description="The file path where the issue was found.")
     line: int = Field(description="The line number of the issue.")
-    severity: Literal["critical", "major", "minor"] = Field(description="Severity of the issue.")
+    severity: Literal["critical", "major", "minor"] = Field(
+        description="Severity of the issue."
+    )
     category: str = Field(description="e.g., security, logic, performance, test.")
     false_positive_reasoning: str = Field(
-        description="Play devil's advocate: Why might this code actually be correct? How could you be missing context or package version details?")
+        description="Play devil's advocate: Why might this code actually be correct? How could you be missing context or package version details?"
+    )
     confidence_score: float = Field(
-        ge=0.0, le=1.0,
-        description="Certainty score from 0.0 to 1.0 that this is a definitive bug/flaw."
+        ge=0.0,
+        le=1.0,
+        description="Certainty score from 0.0 to 1.0 that this is a definitive bug/flaw.",
     )
     comment: str = Field(description="The comment text.")
 
 
 # Sub-Agent Output Schemas
 class SecurityReport(BaseModel):
-    findings: list[LineComment] = Field(description="Security vulnerabilities found. Empty if none.")
+    findings: list[LineComment] = Field(
+        description="Security vulnerabilities found. Empty if none."
+    )
     summary: str = Field(description="Summary of security posture.")
 
 
 class LogicReport(BaseModel):
-    findings: list[LineComment] = Field(description="Bugs, logic flaws, or severe performance issues. Empty if none.")
+    findings: list[LineComment] = Field(
+        description="Bugs, logic flaws, or severe performance issues. Empty if none."
+    )
     summary: str = Field(description="Summary of code correctness.")
 
 
 class ContextReport(BaseModel):
     has_purpose: bool = Field(description="True if MR explains the 'what'.")
     has_test_plan: bool = Field(description="True if MR explains the 'how' or testing.")
-    description_feedback: list[str] = Field(description="Actionable feedback strictly regarding missing PR context.")
+    description_feedback: list[str] = Field(
+        description="Actionable feedback strictly regarding missing PR context."
+    )
 
 
 class ArchitectureReport(BaseModel):
     architectural_issues: list[str] = Field(
-        description="High-level architectural flaws, design pattern issues, or tight coupling. Empty if none.")
-    summary: str = Field(description="Summary of architectural health and maintainability.")
+        description="High-level architectural flaws, design pattern issues, or tight coupling. Empty if none."
+    )
+    summary: str = Field(
+        description="Summary of architectural health and maintainability."
+    )
 
 
 class TestReport(BaseModel):
     findings: list[LineComment] = Field(
-        description="Specific, critical flaws in test logic (e.g., tests that always pass). Empty if none.")
+        description="Specific, critical flaws in test logic (e.g., tests that always pass). Empty if none."
+    )
     testing_feedback: list[str] = Field(
-        description="High-level feedback on missing test cases, edge cases, or gaps in test coverage.")
+        description="High-level feedback on missing test cases, edge cases, or gaps in test coverage."
+    )
     summary: str = Field(description="Summary of test quality.")
 
 
 class PerformanceReport(BaseModel):
     findings: list[LineComment] = Field(
-        description="Specific, severe performance flaws (e.g., N+1 query in a loop). Empty if none.")
+        description="Specific, severe performance flaws (e.g., N+1 query in a loop). Empty if none."
+    )
     performance_feedback: list[str] = Field(
-        description="High-level feedback on scalability, database indexing, and architectural performance.")
+        description="High-level feedback on scalability, database indexing, and architectural performance."
+    )
     summary: str = Field(description="Summary of performance implications.")
 
 
@@ -150,25 +172,125 @@ class FinalReviewResult(BaseModel):
     has_purpose: bool
     has_test_plan: bool
     description_feedback: list[str]
-    security_concerns: list[str] = Field(description="High-level security warnings to put in the PR body.")
-    architectural_feedback: list[str] = Field(description="High-level design and structure feedback. Empty if none.")
-    testing_feedback: list[str] = Field(description="High-level testing strategy and coverage feedback. Empty if none.")
+    security_concerns: list[str] = Field(
+        description="High-level security warnings to put in the PR body."
+    )
+    architectural_feedback: list[str] = Field(
+        description="High-level design and structure feedback. Empty if none."
+    )
+    testing_feedback: list[str] = Field(
+        description="High-level testing strategy and coverage feedback. Empty if none."
+    )
     performance_feedback: list[str] = Field(
-        description="High-level performance and scalability feedback. Empty if none.")
-    actionable_feedback: list[str] = Field(description="High-level code bugs to put in the PR body.")
-    recommend_approval: bool = Field(description="True if there are no major issues and description is adequate.")
+        description="High-level performance and scalability feedback. Empty if none."
+    )
+    actionable_feedback: list[str] = Field(
+        description="High-level code bugs to put in the PR body."
+    )
+    recommend_approval: bool = Field(
+        description="True if there are no major issues and description is adequate."
+    )
     critical_line_comments: list[LineComment] = Field(
-        description="Filtered list of ONLY high-confidence line comments to post.")
+        description="Filtered list of ONLY high-confidence line comments to post."
+    )
 
 
 # ==========================================
 # 4. Shared Tools
 # ==========================================
-def fetch_file_content(ctx: RunContext[ReviewDeps], file_path: str) -> str:
-    """Fetch the full content of a file from the repository to get more context."""
+_MAX_FILE_LINES = 200
+# Hard character budget for a single fetch (guards against single-line bundles,
+# minified JS, etc. that would bypass the line limit).
+_MAX_FILE_CHARS = 80_000
+
+
+def _is_binary(content: bytes) -> bool:
+    """Heuristic: if the content contains null bytes, treat it as binary."""
+    return b"\x00" in content
+
+
+def fetch_file_content(
+    ctx: RunContext[ReviewDeps],
+    file_path: str,
+    start_line: int = 1,
+    max_lines: int = _MAX_FILE_LINES,
+) -> str:
+    """Fetch content of a file from the repository.
+
+    Supports paginated reads to avoid context overflow on large files.
+    Enforces both a line limit (200) and a hard character budget (80 000)
+    so that single-line blobs (minified JS, bundled assets, etc.) are also
+    truncated safely.
+
+    Args:
+        file_path: Path to the file relative to the repo root.
+        start_line: 1-based starting line number for pagination.
+        max_lines: Maximum number of lines to return (default 200).
+    """
     try:
-        content = ctx.deps.mr_request.get_file(file_path)
-        return content if content else f"Error: File '{file_path}' not found."
+        raw = ctx.deps.mr_request.get_file_raw(file_path)
+        if raw is None:
+            return f"Error: File '{file_path}' not found."
+
+        # Binary detection
+        if isinstance(raw, bytes):
+            if _is_binary(raw):
+                size = len(raw)
+                return (
+                    f"Binary file '{file_path}' ({size} bytes). "
+                    "Cannot display binary content. Use other tools to inspect."
+                )
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                return f"Error: File '{file_path}' appears to be non-UTF-8 encoded and cannot be displayed."
+        else:
+            text = raw
+
+        lines = text.splitlines()
+        total = len(lines)
+
+        # Clamp range
+        start_idx = max(0, start_line - 1)
+        end_idx = min(start_idx + max_lines, total)
+
+        chunk = lines[start_idx:end_idx]
+        numbered = [f"{i + start_line:4d} | {line}" for i, line in enumerate(chunk)]
+
+        result = "\n".join(numbered)
+        truncated_chars = False
+
+        # Enforce hard character budget (catches single-line blobs, minified JS, etc.)
+        budget = _MAX_FILE_CHARS
+        if len(result) > budget:
+            # Reserve space for the truncation banner
+            banner = "\n\n... (line content truncated — exceeds character limit.)"
+            available = budget - len(banner)
+            # Trim the joined output, then re-split so the last line is cleanly cut
+            trimmed = result[:available]
+            # Find the last newline so we don't split a numbered line mid-join
+            last_newline = trimmed.rfind("\n")
+            if last_newline > 0:
+                trimmed = trimmed[:last_newline]
+            result = trimmed + banner
+            truncated_chars = True
+
+        # Append "more lines" hint only if there are remaining lines AND we didn't
+        # already hit the character budget mid-chunk
+        remaining_lines = total - end_idx
+        if remaining_lines > 0 and not truncated_chars:
+            result += (
+                f"\n\n... (truncated. {remaining_lines} more lines. "
+                f"Call again with start_line={end_idx + 1} to continue.)"
+            )
+        elif truncated_chars:
+            # We hit the char budget mid-chunk; tell the LLM to narrow the window
+            result += (
+                f"\n... (file is {total} lines / {len(text)} chars total. "
+                "Reduce max_lines or target a smaller region.)"
+            )
+
+        return result
     except Exception as e:
         return f"Error fetching file: {str(e)}"
 
@@ -198,8 +320,10 @@ def execute_command(ctx: RunContext[ReviewDeps], command: str) -> str:
 
 
 shared_tools = [
-    Tool(fetch_file_content), Tool(list_files),
-    Tool(scan_code), Tool(execute_command)
+    Tool(fetch_file_content),
+    Tool(list_files),
+    Tool(scan_code),
+    Tool(execute_command),
 ]
 
 # ==========================================
@@ -232,72 +356,70 @@ security_agent = Agent(
     **agent_kwargs,
     output_type=SecurityReport,
     system_prompt=(
-            "You are an elite Application Security Engineer. Your ONLY job is to find security vulnerabilities "
-            "(e.g., XSS, SQLi, Auth bypass, Secrets in code) in the provided diff.\n"
-            "- IGNORE logic bugs, styling, architecture, tests, or PR descriptions.\n"
-            "- Use tools to verify if a variable is sanitized elsewhere before calling it a vulnerability.\n"
-            "- If the code is secure, return an empty findings list."
-            + SUB_AGENT_SHIELD
-    )
+        "You are an elite Application Security Engineer. Your ONLY job is to find security vulnerabilities "
+        "(e.g., XSS, SQLi, Auth bypass, Secrets in code) in the provided diff.\n"
+        "- IGNORE logic bugs, styling, architecture, tests, or PR descriptions.\n"
+        "- Use tools to verify if a variable is sanitized elsewhere before calling it a vulnerability.\n"
+        "- If the code is secure, return an empty findings list." + SUB_AGENT_SHIELD
+    ),
 )
 
 logic_agent = Agent(
     **agent_kwargs,
     output_type=LogicReport,
     system_prompt=(
-            "You are a Principal Software Engineer. Your ONLY job is to find strict logic bugs, type errors, "
-            "and unhandled exceptions in the diff.\n"
-            "- IGNORE styling, formatting, variable naming, architecture, tests, and PR descriptions.\n"
-            "- DO NOT assume missing context is a bug. Use tools to verify missing imports/variables.\n"
-            "- If you cannot prove it is a bug, DO NOT report it."
-            + SUB_AGENT_SHIELD
-    )
+        "You are a Principal Software Engineer. Your ONLY job is to find strict logic bugs, type errors, "
+        "and unhandled exceptions in the diff.\n"
+        "- IGNORE styling, formatting, variable naming, architecture, tests, and PR descriptions.\n"
+        "- DO NOT assume missing context is a bug. Use tools to verify missing imports/variables.\n"
+        "- If you cannot prove it is a bug, DO NOT report it." + SUB_AGENT_SHIELD
+    ),
 )
 
 architecture_agent = Agent(
     **agent_kwargs,
     output_type=ArchitectureReport,
     system_prompt=(
-            "You are a Staff Software Architect. Your ONLY job is to review the code's high-level design and structure.\n"
-            "- Look for violations of SOLID principles, DRY, or tight coupling.\n"
-            "- IGNORE micro-level logic bugs, styling, security vulnerabilities, or PR descriptions.\n"
-            "- DO NOT provide line-by-line comments. Provide general, high-level feedback.\n"
-            + SUB_AGENT_SHIELD
-    )
+        "You are a Staff Software Architect. Your ONLY job is to review the code's high-level design and structure.\n"
+        "- Look for violations of SOLID principles, DRY, or tight coupling.\n"
+        "- IGNORE micro-level logic bugs, styling, security vulnerabilities, or PR descriptions.\n"
+        "- DO NOT provide line-by-line comments. Provide general, high-level feedback.\n"
+        + SUB_AGENT_SHIELD
+    ),
 )
 
 test_agent = Agent(
     **agent_kwargs,
     output_type=TestReport,
     system_prompt=(
-            "You are a QA and Test Automation Engineer. Your ONLY job is to evaluate test coverage and edge cases.\n"
-            "- Identify edge cases, boundary conditions, and race conditions that the current code/tests miss.\n"
-            "- Review existing tests in the diff to ensure they actually assert meaningful outcomes (no 'happy path only' tests).\n"
-            "- IGNORE general logic bugs outside of testing, architecture, styling, and security.\n"
-            + SUB_AGENT_SHIELD
-    )
+        "You are a QA and Test Automation Engineer. Your ONLY job is to evaluate test coverage and edge cases.\n"
+        "- Identify edge cases, boundary conditions, and race conditions that the current code/tests miss.\n"
+        "- Review existing tests in the diff to ensure they actually assert meaningful outcomes (no 'happy path only' tests).\n"
+        "- IGNORE general logic bugs outside of testing, architecture, styling, and security.\n"
+        + SUB_AGENT_SHIELD
+    ),
 )
 
 performance_agent = Agent(
     **agent_kwargs,
     output_type=PerformanceReport,
     system_prompt=(
-            "You are a Performance & Scalability Engineer. Your ONLY job is to identify system-crashing scale issues.\n"
-            "- Hunt for N+1 database queries, missing indexes, memory leaks, and inefficient Big-O complexity.\n"
-            "- Think about what happens when this code processes 10 million records, not 10 records.\n"
-            + SUB_AGENT_SHIELD
-    )
+        "You are a Performance & Scalability Engineer. Your ONLY job is to identify system-crashing scale issues.\n"
+        "- Hunt for N+1 database queries, missing indexes, memory leaks, and inefficient Big-O complexity.\n"
+        "- Think about what happens when this code processes 10 million records, not 10 records.\n"
+        + SUB_AGENT_SHIELD
+    ),
 )
 
 context_agent = Agent(
     **agent_kwargs,
     output_type=ContextReport,
     system_prompt=(
-            "You are a strict Technical Lead. Your ONLY job is to evaluate the PR Description.\n"
-            "- Does it explain WHAT the change is and HOW it was tested (Test Plan)?\n"
-            "- IGNORE the code diff completely, except to check if major changes lack description context."
-            + SUB_AGENT_SHIELD
-    )
+        "You are a strict Technical Lead. Your ONLY job is to evaluate the PR Description.\n"
+        "- Does it explain WHAT the change is and HOW it was tested (Test Plan)?\n"
+        "- IGNORE the code diff completely, except to check if major changes lack description context."
+        + SUB_AGENT_SHIELD
+    ),
 )
 
 
@@ -316,15 +438,16 @@ critic_agent = Agent(
     deps_type=CriticDeps,
     output_type=FinalReviewResult,
     system_prompt=(
-            "You are the Final Review Consolidator and Gatekeeper. You will receive reports from Security, "
-            "Logic, Context, Architecture, Testing, and Performance agents.\n\n"
-            "YOUR JOB:\n"
-            "1. Consolidate all reports into a unified review.\n"
-            "2. RUTHLESSLY FILTER FALSE POSITIVES. Look at the `confidence_score` and `false_positive_reasoning` of every LineComment.\n"
-            "3. If a comment has a confidence score < 0.8, or if the `false_positive_reasoning` reveals it's likely a hallucination, DROP IT entirely.\n"            "4. Summarize the remaining valid findings into the final schema.\n"
-            "Do not invent new issues; only filter and consolidate the provided reports."
-            + CRITIC_SHIELD
-    )
+        "You are the Final Review Consolidator and Gatekeeper. You will receive reports from Security, "
+        "Logic, Context, Architecture, Testing, and Performance agents.\n\n"
+        "YOUR JOB:\n"
+        "1. Consolidate all reports into a unified review.\n"
+        "2. RUTHLESSLY FILTER FALSE POSITIVES. Look at the `confidence_score` and `false_positive_reasoning` of every LineComment.\n"
+        "3. If a comment has a confidence score < 0.8, or if the `false_positive_reasoning` reveals it's likely a hallucination, DROP IT entirely.\n"
+        "4. Summarize the remaining valid findings into the final schema.\n"
+        "Do not invent new issues; only filter and consolidate the provided reports."
+        + CRITIC_SHIELD
+    ),
 )
 
 
@@ -336,7 +459,8 @@ async def async_review_process(logger, mr_request, mr_description, secure_prompt
     deps = ReviewDeps(mr_request=mr_request, mr_description=mr_description)
 
     logger.info(
-        "🚀 Launching 6 specialized agents concurrently (Security, Logic, Architecture, Context, QA, Performance)...")
+        "🚀 Launching 6 specialized agents concurrently (Security, Logic, Architecture, Context, QA, Performance)..."
+    )
 
     sec_task = security_agent.run(secure_prompt, deps=deps)
     log_task = logic_agent.run(secure_prompt, deps=deps)
@@ -349,7 +473,9 @@ async def async_review_process(logger, mr_request, mr_description, secure_prompt
         sec_task, log_task, arch_task, ctx_task, test_task, perf_task
     )
 
-    logger.info("✅ Sub-agents finished. Passing to Critic Agent for consolidation & filtering...")
+    logger.info(
+        "✅ Sub-agents finished. Passing to Critic Agent for consolidation & filtering..."
+    )
 
     critic_deps = CriticDeps(
         mr_request=mr_request,
@@ -359,7 +485,7 @@ async def async_review_process(logger, mr_request, mr_description, secure_prompt
         context_report=ctx_res.output,
         architecture_report=arch_res.output,
         test_report=test_res.output,
-        performance_report=perf_res.output
+        performance_report=perf_res.output,
     )
 
     # Wrap the JSON reports safely so payloads don't execute in the Critic prompt
@@ -394,34 +520,55 @@ async def async_review_process(logger, mr_request, mr_description, secure_prompt
     markdown_comment += f"**Summary:** {review_result.summary}\n\n"
 
     if review_result.description_feedback:
-        markdown_comment += "## 📝 PR Description Improvements\n" + "\n".join(
-            f"- {f}" for f in review_result.description_feedback) + "\n\n"
+        markdown_comment += (
+            "## 📝 PR Description Improvements\n"
+            + "\n".join(f"- {f}" for f in review_result.description_feedback)
+            + "\n\n"
+        )
 
     if review_result.security_concerns:
-        markdown_comment += "## 🚨 Security Concerns\n" + "\n".join(
-            f"- {c}" for c in review_result.security_concerns) + "\n\n"
+        markdown_comment += (
+            "## 🚨 Security Concerns\n"
+            + "\n".join(f"- {c}" for c in review_result.security_concerns)
+            + "\n\n"
+        )
 
     if review_result.architectural_feedback:
-        markdown_comment += "## 🏗️ Architecture & Design\n" + "\n".join(
-            f"- {f}" for f in review_result.architectural_feedback) + "\n\n"
+        markdown_comment += (
+            "## 🏗️ Architecture & Design\n"
+            + "\n".join(f"- {f}" for f in review_result.architectural_feedback)
+            + "\n\n"
+        )
 
     if review_result.performance_feedback:
-        markdown_comment += "## 🚀 Performance & Scalability\n" + "\n".join(
-            f"- {f}" for f in review_result.performance_feedback) + "\n\n"
+        markdown_comment += (
+            "## 🚀 Performance & Scalability\n"
+            + "\n".join(f"- {f}" for f in review_result.performance_feedback)
+            + "\n\n"
+        )
 
     if review_result.testing_feedback:
-        markdown_comment += "## 🧪 Testing & QA\n" + "\n".join(f"- {f}" for f in review_result.testing_feedback) + "\n\n"
+        markdown_comment += (
+            "## 🧪 Testing & QA\n"
+            + "\n".join(f"- {f}" for f in review_result.testing_feedback)
+            + "\n\n"
+        )
 
     if review_result.actionable_feedback:
-        markdown_comment += "## 🛠️ Code Feedback\n" + "\n".join(
-            f"- {f}" for f in review_result.actionable_feedback) + "\n\n"
+        markdown_comment += (
+            "## 🛠️ Code Feedback\n"
+            + "\n".join(f"- {f}" for f in review_result.actionable_feedback)
+            + "\n\n"
+        )
 
     logger.info("Markdown Output Generated:\n" + markdown_comment)
 
     # Post filtered line-by-line comments
     for comment in review_result.critical_line_comments:
         text = f"**{comment.severity.upper()} ({comment.category})**: {comment.comment}"
-        logger.info(f"{comment.file}:{comment.line} (Confidence {comment.confidence_score}): {text}")
+        logger.info(
+            f"{comment.file}:{comment.line} (Confidence {comment.confidence_score}): {text}"
+        )
         if post:
             mr_request.post_line_review(text, None, comment.file, None, comment.line)
 
@@ -467,18 +614,26 @@ def review(spec, backend, post=False):
 
             secure_prompt = (
                 f"Review the following Merge Request details:\n\n"
+                f"### DATE:\n{date.today().isoformat()}\n\n"
                 f"### MR TITLE:\n<title>\n{wrap_in_cdata(mr_request.title())}\n</title>\n\n"
                 f"### MR DESCRIPTION:\n<description>\n{wrap_in_cdata(mr_description)}\n</description>\n\n"
                 f"### CODE DIFF:\n<untrusted_diff>\n{wrap_in_cdata(inject_line_numbers(diff_content))}\n</untrusted_diff>"
             )
 
             # Trigger the async multi-agent flow
-            asyncio.run(async_review_process(logger, mr_request, mr_description, secure_prompt, post))
+            asyncio.run(
+                async_review_process(
+                    logger, mr_request, mr_description, secure_prompt, post
+                )
+            )
         except Exception as e:
-            logger.error(f"💥 CRITICAL: Critic agent failed to output valid JSON after retries. Error: {str(e)}")
+            logger.error(
+                f"💥 CRITICAL: Critic agent failed to output valid JSON after retries. Error: {str(e)}"
+            )
             if post:
                 mr_request.post_review(
-                    "## 🤖 AI Review Error\n\nThe AI reviewer encountered a fatal error while trying to process this diff (Validation Failure). Please review manually.")
+                    "## 🤖 AI Review Error\n\nThe AI reviewer encountered a fatal error while trying to process this diff (Validation Failure). Please review manually."
+                )
             return
         finally:
             mr_request.cleanup()

@@ -74,10 +74,10 @@ class BaseBackend:
                 return "No matches found."
             return f"Error scanning code: {e}"
 
-    def get_file(self, file_path, include_line_numbers=True):
-        """
-        Fetches the content of a file from the locally cloned repository.
-        Optionally prepends line numbers for LLM context.
+    def get_file_raw(self, file_path: str):
+        """Return raw file content (str or bytes) without line-number formatting.
+
+        Used by the fetch_file_content tool for pagination and binary detection.
         """
         if not getattr(self, "repo_dir", None):
             return None
@@ -89,19 +89,15 @@ class BaseBackend:
 
         full_path = os.path.join(self.repo_dir, file_path)
         try:
-            with open(full_path, "r") as f:
-                content = f.read()
-
-            # Inject line numbers if requested by the LLM tool
-            if include_line_numbers:
-                numbered_lines = [
-                    f"{i + 1:4d} | {line}"
-                    for i, line in enumerate(content.splitlines())
-                ]
-                return "\n".join(numbered_lines)
-
-            return content
-
+            # Try text first; fall back to binary
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except UnicodeDecodeError:
+                with open(full_path, "rb") as f:
+                    return f.read()
+        except FileNotFoundError:
+            return None
         except Exception as e:
             if hasattr(self, "logger"):
                 self.logger.error(
