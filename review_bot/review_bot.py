@@ -96,9 +96,12 @@ class LineComment(BaseModel):
     line: int = Field(description="The line number of the issue.")
     severity: Literal["critical", "major", "minor"] = Field(description="Severity of the issue.")
     category: str = Field(description="e.g., security, logic, performance, test.")
-    false_positive_check: str = Field(
+    false_positive_reasoning: str = Field(
         description="Play devil's advocate: Why might this code actually be correct? How could you be missing context or package version details?")
-    confidence_score: int = Field(ge=1, le=10, description="1-10 certainty score that this is a definitive bug/flaw.")
+    confidence_score: float = Field(
+        ge=0.0, le=1.0,
+        description="Certainty score from 0.0 to 1.0 that this is a definitive bug/flaw."
+    )
     comment: str = Field(description="The comment text.")
 
 
@@ -282,7 +285,6 @@ performance_agent = Agent(
             "You are a Performance & Scalability Engineer. Your ONLY job is to identify system-crashing scale issues.\n"
             "- Hunt for N+1 database queries, missing indexes, memory leaks, and inefficient Big-O complexity.\n"
             "- Think about what happens when this code processes 10 million records, not 10 records.\n"
-            "- IGNORE general logic bugs, styling, architecture, and tests.\n"
             + SUB_AGENT_SHIELD
     )
 )
@@ -318,9 +320,8 @@ critic_agent = Agent(
             "Logic, Context, Architecture, Testing, and Performance agents.\n\n"
             "YOUR JOB:\n"
             "1. Consolidate all reports into a unified review.\n"
-            "2. RUTHLESSLY FILTER FALSE POSITIVES. Look at the `confidence_score` and `false_positive_check` of every LineComment.\n"
-            "3. If a comment has a confidence score < 8, or if the `false_positive_check` reveals it's likely a hallucination, DROP IT entirely.\n"
-            "4. Summarize the remaining valid findings into the final schema.\n"
+            "2. RUTHLESSLY FILTER FALSE POSITIVES. Look at the `confidence_score` and `false_positive_reasoning` of every LineComment.\n"
+            "3. If a comment has a confidence score < 0.8, or if the `false_positive_reasoning` reveals it's likely a hallucination, DROP IT entirely.\n"            "4. Summarize the remaining valid findings into the final schema.\n"
             "Do not invent new issues; only filter and consolidate the provided reports."
             + CRITIC_SHIELD
     )
