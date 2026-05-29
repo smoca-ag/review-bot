@@ -303,10 +303,58 @@ def list_files(ctx: RunContext[ReviewDeps], path: str = ".") -> str:
         return f"Error listing files: {str(e)}"
 
 
-def scan_code(ctx: RunContext[ReviewDeps], pattern: str, path: str = ".") -> str:
-    """Scan the repository for a regex pattern."""
+def scan_code(
+    ctx: RunContext[ReviewDeps],
+    pattern: str,
+    path: str = ".",
+    start_line: int = 1,
+    max_lines: int = _MAX_FILE_LINES,
+) -> str:
+    """Scan the repository for a regex pattern.
+
+    Supports paginated reads to avoid context overflow on large result sets.
+    """
     try:
-        return ctx.deps.mr_request.scan_code(pattern, path)
+        raw = ctx.deps.mr_request.scan_code(pattern, path)
+        if raw.startswith("Error") or raw == "No matches found.":
+            return raw
+
+        lines = raw.splitlines()
+        total = len(lines)
+
+        # Clamp range
+        start_idx = max(0, start_line - 1)
+        end_idx = min(start_idx + max_lines, total)
+
+        chunk = lines[start_idx:end_idx]
+        result = "\n".join(chunk)
+        truncated_chars = False
+
+        # Enforce hard character budget
+        budget = _MAX_FILE_CHARS
+        if len(result) > budget:
+            banner = "\n\n... (scan results truncated — exceeds character limit.)"
+            available = budget - len(banner)
+            trimmed = result[:available]
+            last_newline = trimmed.rfind("\n")
+            if last_newline > 0:
+                trimmed = trimmed[:last_newline]
+            result = trimmed + banner
+            truncated_chars = True
+
+        remaining_lines = total - end_idx
+        if remaining_lines > 0 and not truncated_chars:
+            result += (
+                f"\n\n... (truncated. {remaining_lines} more lines. "
+                f"Call again with start_line={end_idx + 1} to continue.)"
+            )
+        elif truncated_chars:
+            result += (
+                f"\n... (scan results are {total} lines / {len(raw)} chars total. "
+                "Reduce max_lines or use a more specific pattern/path.)"
+            )
+
+        return result
     except Exception as e:
         return f"Error scanning code: {str(e)}"
 
@@ -441,7 +489,7 @@ critic_agent = Agent(
         "You are the Final Review Consolidator and Gatekeeper. You will receive reports from Security, "
         "Logic, Context, Architecture, Testing, and Performance agents.\n\n"
         "YOUR JOB:\n"
-        "1. Consolidate all reports into a unified review.\n"
+        "1. Consolidate all reports into a unified review. Remove duplicates.\n"
         "2. RUTHLESSLY FILTER FALSE POSITIVES. Look at the `confidence_score` and `false_positive_reasoning` of every LineComment.\n"
         "3. If a comment has a confidence score < 0.8, or if the `false_positive_reasoning` reveals it's likely a hallucination, DROP IT entirely.\n"
         "4. Summarize the remaining valid findings into the final schema.\n"
