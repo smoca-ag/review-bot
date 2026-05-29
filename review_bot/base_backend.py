@@ -133,7 +133,7 @@ class BaseBackend:
                 "--name",
                 self.container_name,
                 "-v",
-                f"{abs_repo_dir}:/workspace",
+                f"{abs_repo_dir}:/workspace:O",
                 "-w",
                 "/workspace",
                 image,
