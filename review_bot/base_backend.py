@@ -23,95 +23,110 @@ class BaseBackend:
         """
         return False
 
-    def _is_safe_path(self, target_path: str) -> bool:
-        """
-        Validates that the provided path resolves strictly within the repo_dir.
-        Prevents directory traversal (e.g., '../') and absolute path escapes.
-        """
-        if not self.repo_dir:
-            return False
-
-        base_dir = os.path.abspath(self.repo_dir)
-        # os.path.join ignores base_dir if target_path is an absolute path (e.g., '/etc')
-        full_path = os.path.abspath(os.path.join(base_dir, target_path))
-
-        try:
-            # commonpath checks if the resolved path is a child of the base directory
-            return os.path.commonpath([base_dir, full_path]) == base_dir
-        except ValueError:
-            # commonpath raises ValueError if paths are on different drives (e.g., Windows)
-            return False
-
     def list_files(self, path="."):
-        if not self.repo_dir:
-            return "Repository not fetched locally."
-
-        if not self._is_safe_path(path):
-            return "Error: Invalid or restricted path."
+        if not getattr(self, "container_name", None):
+            return "Error: No active container found."
 
         try:
             output = subprocess.check_output(
-                ["ls", "-la", path], cwd=self.repo_dir, text=True
+                ["podman", "exec", self.container_name, "sh", "-c", f"ls -la '{path}'"],
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=30,
             )
             return output
+        except subprocess.TimeoutExpired:
+            return "Error: Command timed out after 30 seconds."
         except subprocess.CalledProcessError as e:
-            return f"Error listing files: {e}"
+            return f"Error listing files: {e.output.strip()}"
 
     def scan_code(self, pattern, path="."):
-        if not self.repo_dir:
-            return "Repository not fetched locally."
-
-        if not self._is_safe_path(path):
-            return "Error: Invalid or restricted path."
+        if not getattr(self, "container_name", None):
+            return "Error: No active container found."
 
         try:
             output = subprocess.check_output(
-                ["git", "grep", "-n", pattern, path], cwd=self.repo_dir, text=True
+                [
+                    "podman",
+                    "exec",
+                    self.container_name,
+                    "sh",
+                    "-c",
+                    f"git grep -n '{pattern}' '{path}'",
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=30,
             )
             return output
+        except subprocess.TimeoutExpired:
+            return "Error: Command timed out after 30 seconds."
         except subprocess.CalledProcessError as e:
             if e.returncode == 1:
                 return "No matches found."
-            return f"Error scanning code: {e}"
+            return f"Error scanning code: {e.output.strip()}"
 
     def get_file_raw(self, file_path: str):
-        """Return raw file content (str or bytes) without line-number formatting.
+        """Return raw file content (str or bytes) from the container without line-number formatting.
 
         Used by the fetch_file_content tool for pagination and binary detection.
         """
-        if not getattr(self, "repo_dir", None):
-            return None
+        if not getattr(self, "container_name", None):
+            return "Error: No active container found."
 
-        if not self._is_safe_path(file_path):
-            if hasattr(self, "logger"):
-                self.logger.error(f"Unauthorized file access attempt: {file_path}")
-            return None
-
-        full_path = os.path.join(self.repo_dir, file_path)
         try:
-            # Try text first; fall back to binary
-            try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    return f.read()
-            except UnicodeDecodeError:
-                with open(full_path, "rb") as f:
-                    return f.read()
-        except FileNotFoundError:
-            return None
-        except Exception as e:
-            if hasattr(self, "logger"):
-                self.logger.error(
-                    f"Error reading file {file_path} from local repo: {e}"
-                )
-            return None
+            # Detect file type inside the container; read as hex for binary, text for text
+            file_check = subprocess.check_output(
+                [
+                    "podman",
+                    "exec",
+                    self.container_name,
+                    "sh",
+                    "-c",
+                    f"file -b --mime-type '{file_path}'",
+                ],
+                text=True,
+                timeout=10,
+            ).strip()
 
-    def get_files(self, paths):
-        paths_dict = {}
-        for path in paths:
-            paths_dict[path] = self.get_file(path)
-        return paths_dict
+            if "binary" in file_check or file_check.startswith("application/"):
+                # Binary: read as hex dump to preserve bytes
+                hex_output = subprocess.check_output(
+                    [
+                        "podman",
+                        "exec",
+                        self.container_name,
+                        "sh",
+                        "-c",
+                        f"xxd -p '{file_path}' | tr -d '\\n'",
+                    ],
+                    text=True,
+                    timeout=30,
+                ).strip()
+                return bytes.fromhex(hex_output)
 
-    def setup_container(self, image="python:3.11-slim"):
+            # Text file
+            output = subprocess.check_output(
+                [
+                    "podman",
+                    "exec",
+                    self.container_name,
+                    "sh",
+                    "-c",
+                    f"cat '{file_path}'",
+                ],
+                text=True,
+                timeout=30,
+            )
+            return output
+        except subprocess.TimeoutExpired:
+            return "Error: Command timed out after 30 seconds."
+        except subprocess.CalledProcessError as e:
+            if "No such file" in e.output or "cannot access" in e.output:
+                return None
+            return f"Error reading file {file_path}: {e.output.strip()}"
+
+    def setup_container(self, image="python:3.11"):
         if not getattr(self, "repo_dir", None):
             if hasattr(self, "logger"):
                 self.logger.error("No repository directory to mount.")
