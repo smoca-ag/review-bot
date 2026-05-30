@@ -398,6 +398,7 @@ agent_kwargs = {
     "deps_type": ReviewDeps,
     "tools": shared_tools,
     "retries": 3,
+    "capabilities": [Thinking(effort="high")],
 }
 
 security_agent = Agent(
