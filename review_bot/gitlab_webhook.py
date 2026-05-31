@@ -204,14 +204,63 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
         mr_id = attributes.get("iid", "N/A")
         mr_url = attributes.get("url", "N/A")
 
-        logger.info(f"Received update for MR !{mr_id}. Labels: {label_names}")
+        # Determine the reason for the trigger
+        is_new_commit = "oldrev" in attributes
+        is_label_added = False
 
-        if GITLAB_WEBHOOK_REVIEW_ALL or GITLAB_WEBHOOK_LABEL in label_names:
-            if GITLAB_WEBHOOK_REVIEW_ALL:
-                logger.info(f"Review all flag is set. Processing MR !{mr_id}.")
+        changes = data.get("changes", {})
+        if "labels" in changes:
+            prev_labels = [l["title"] for l in changes["labels"].get("previous", [])]
+            curr_labels = [l["title"] for l in changes["labels"].get("current", [])]
+            if (
+                GITLAB_WEBHOOK_LABEL in curr_labels
+                and GITLAB_WEBHOOK_LABEL not in prev_labels
+            ):
+                is_label_added = True
+
+        logger.info(
+            f"Received update for MR !{mr_id}. Action: {mr_action}, New Commit: {is_new_commit}, Label Added: {is_label_added}"
+        )
+
+        trigger_review = False
+
+        if GITLAB_WEBHOOK_REVIEW_ALL:
+            if mr_action in ["open", "reopen"] or is_new_commit:
+                trigger_review = True
+                logger.info(
+                    f"Review all flag is set. Triggering on {mr_action}/new_commit for MR !{mr_id}."
+                )
             else:
-                logger.info(f"'{GITLAB_WEBHOOK_LABEL}' label found for MR !{mr_id}.")
+                logger.info(
+                    f"Review all flag is set, but ignoring non-code update for MR !{mr_id}."
+                )
+        else:
+            if GITLAB_WEBHOOK_LABEL in label_names:
+                if is_label_added:
+                    trigger_review = True
+                    logger.info(
+                        f"'{GITLAB_WEBHOOK_LABEL}' label was just added to MR !{mr_id}."
+                    )
+                elif is_new_commit:
+                    trigger_review = True
+                    logger.info(
+                        f"New commits pushed to MR !{mr_id} with '{GITLAB_WEBHOOK_LABEL}' label."
+                    )
+                elif mr_action in ["open", "reopen"]:
+                    trigger_review = True
+                    logger.info(
+                        f"MR !{mr_id} opened/reopened with '{GITLAB_WEBHOOK_LABEL}' label."
+                    )
+                else:
+                    logger.info(
+                        f"Ignoring update to MR !{mr_id} (label present, but no new commits)."
+                    )
+            else:
+                logger.info(
+                    f"No '{GITLAB_WEBHOOK_LABEL}' label found for MR !{mr_id} and review all is disabled."
+                )
 
+        if trigger_review:
             if mr_url == "N/A" or mr_id == "N/A":
                 logger.error(
                     f"Could not find MR ID or URL for incoming event. Aborting review."
@@ -222,11 +271,6 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
                 review_manager.submit(mr_id, mr_url)
             else:
                 logger.error("Review manager is not initialized.")
-
-        else:
-            logger.info(
-                f"No '{GITLAB_WEBHOOK_LABEL}' label found for MR !{mr_id} and review all is disabled."
-            )
 
     def do_GET(self):
         """Handle GET requests (e.g., for health checks)."""
