@@ -62,7 +62,7 @@ This tool leverages AI models via [Pydantic AI](https://ai.pydantic.dev/) to per
     # ANTHROPIC_API_KEY="your_anthropic_api_key"
 
     # Optional: OpenTelemetry tracing
-    # OPENTELEMETRY_ENDPOINT="http://localhost:4318/v1/traces"
+    # OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
 
     # Webhook server configuration (if using review-bot-gitlab-webhook)
     # WEBHOOK_HOST="0.0.0.0"
