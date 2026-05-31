@@ -382,6 +382,7 @@ agent_kwargs = {
     "tools": shared_tools,
     "retries": 3,
     "capabilities": [Thinking(effort="high")],
+    "model_settings": {"timeout": 1800},
 }
 
 security_agent = Agent(
@@ -469,6 +470,7 @@ critic_agent = Agent(
     model,
     deps_type=CriticDeps,
     output_type=FinalReviewResult,
+    model_settings={"timeout": 1800},
     system_prompt=(
         "You are the Final Review Consolidator and Gatekeeper. You will receive reports from Security, "
         "Logic, Context, Architecture, Testing, and Performance agents.\n\n"
