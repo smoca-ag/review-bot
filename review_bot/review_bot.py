@@ -199,9 +199,44 @@ class FinalReviewResult(BaseModel):
 # 4. Shared Tools
 # ==========================================
 _MAX_FILE_LINES = 200
-# Hard character budget for a single fetch (guards against single-line bundles,
-# minified JS, etc. that would bypass the line limit).
-_MAX_FILE_CHARS = 80_000
+_MAX_LINE_LENGTH = 150
+
+
+def _paginate_text(
+    text: str,
+    start_line: int,
+    max_lines: int,
+    max_line_length: int = _MAX_LINE_LENGTH,
+    add_line_numbers: bool = False,
+) -> str:
+    lines = text.splitlines()
+    total = len(lines)
+
+    start_idx = max(0, start_line - 1)
+    end_idx = min(start_idx + max_lines, total)
+
+    chunk = lines[start_idx:end_idx]
+
+    processed_chunk = []
+    for i, line in enumerate(chunk):
+        if len(line) > max_line_length:
+            line = line[: max_line_length - 3] + "..."
+
+        if add_line_numbers:
+            processed_chunk.append(f"{i + start_line:4d} | {line}")
+        else:
+            processed_chunk.append(line)
+
+    result = "\n".join(processed_chunk)
+
+    remaining_lines = total - end_idx
+    if remaining_lines > 0:
+        result += (
+            f"\n\n... (truncated. {remaining_lines} more lines. "
+            f"Call again with start_line={end_idx + 1} to continue.)"
+        )
+
+    return result
 
 
 def _is_binary(content: bytes) -> bool:
@@ -247,58 +282,23 @@ def fetch_file_content(
         else:
             text = raw
 
-        lines = text.splitlines()
-        total = len(lines)
-
-        # Clamp range
-        start_idx = max(0, start_line - 1)
-        end_idx = min(start_idx + max_lines, total)
-
-        chunk = lines[start_idx:end_idx]
-        numbered = [f"{i + start_line:4d} | {line}" for i, line in enumerate(chunk)]
-
-        result = "\n".join(numbered)
-        truncated_chars = False
-
-        # Enforce hard character budget (catches single-line blobs, minified JS, etc.)
-        budget = _MAX_FILE_CHARS
-        if len(result) > budget:
-            # Reserve space for the truncation banner
-            banner = "\n\n... (line content truncated — exceeds character limit.)"
-            available = budget - len(banner)
-            # Trim the joined output, then re-split so the last line is cleanly cut
-            trimmed = result[:available]
-            # Find the last newline so we don't split a numbered line mid-join
-            last_newline = trimmed.rfind("\n")
-            if last_newline > 0:
-                trimmed = trimmed[:last_newline]
-            result = trimmed + banner
-            truncated_chars = True
-
-        # Append "more lines" hint only if there are remaining lines AND we didn't
-        # already hit the character budget mid-chunk
-        remaining_lines = total - end_idx
-        if remaining_lines > 0 and not truncated_chars:
-            result += (
-                f"\n\n... (truncated. {remaining_lines} more lines. "
-                f"Call again with start_line={end_idx + 1} to continue.)"
-            )
-        elif truncated_chars:
-            # We hit the char budget mid-chunk; tell the LLM to narrow the window
-            result += (
-                f"\n... (file is {total} lines / {len(text)} chars total. "
-                "Reduce max_lines or target a smaller region.)"
-            )
-
-        return result
+        return _paginate_text(text, start_line, max_lines, add_line_numbers=True)
     except Exception as e:
         return f"Error fetching file: {str(e)}"
 
 
-def list_files(ctx: RunContext[ReviewDeps], path: str = ".") -> str:
+def list_files(
+    ctx: RunContext[ReviewDeps],
+    path: str = ".",
+    start_line: int = 1,
+    max_lines: int = _MAX_FILE_LINES,
+) -> str:
     """List files in the repository at the given path."""
     try:
-        return ctx.deps.mr_request.list_files(path)
+        raw = ctx.deps.mr_request.list_files(path)
+        if raw.startswith("Error"):
+            return raw
+        return _paginate_text(raw, start_line, max_lines)
     except Exception as e:
         return f"Error listing files: {str(e)}"
 
@@ -318,51 +318,23 @@ def scan_code(
         raw = ctx.deps.mr_request.scan_code(pattern, path)
         if raw.startswith("Error") or raw == "No matches found.":
             return raw
-
-        lines = raw.splitlines()
-        total = len(lines)
-
-        # Clamp range
-        start_idx = max(0, start_line - 1)
-        end_idx = min(start_idx + max_lines, total)
-
-        chunk = lines[start_idx:end_idx]
-        result = "\n".join(chunk)
-        truncated_chars = False
-
-        # Enforce hard character budget
-        budget = _MAX_FILE_CHARS
-        if len(result) > budget:
-            banner = "\n\n... (scan results truncated — exceeds character limit.)"
-            available = budget - len(banner)
-            trimmed = result[:available]
-            last_newline = trimmed.rfind("\n")
-            if last_newline > 0:
-                trimmed = trimmed[:last_newline]
-            result = trimmed + banner
-            truncated_chars = True
-
-        remaining_lines = total - end_idx
-        if remaining_lines > 0 and not truncated_chars:
-            result += (
-                f"\n\n... (truncated. {remaining_lines} more lines. "
-                f"Call again with start_line={end_idx + 1} to continue.)"
-            )
-        elif truncated_chars:
-            result += (
-                f"\n... (scan results are {total} lines / {len(raw)} chars total. "
-                "Reduce max_lines or use a more specific pattern/path.)"
-            )
-
-        return result
+        return _paginate_text(raw, start_line, max_lines)
     except Exception as e:
         return f"Error scanning code: {str(e)}"
 
 
-def execute_command(ctx: RunContext[ReviewDeps], command: str) -> str:
+def execute_command(
+    ctx: RunContext[ReviewDeps],
+    command: str,
+    start_line: int = 1,
+    max_lines: int = _MAX_FILE_LINES,
+) -> str:
     """Execute a shell command inside a sandboxed container."""
     try:
-        return ctx.deps.mr_request.execute_command(command)
+        raw = ctx.deps.mr_request.execute_command(command)
+        if raw.startswith("Error"):
+            return raw
+        return _paginate_text(raw, start_line, max_lines)
     except Exception as e:
         return f"Error executing command: {str(e)}"
 
