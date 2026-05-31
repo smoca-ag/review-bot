@@ -12,6 +12,7 @@ from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
     ConsoleSpanExporter,
     SimpleSpanProcessor,
 )
@@ -24,14 +25,24 @@ import review_bot
 # ==========================================
 # 1. Telemetry & Environment Setup
 # ==========================================
+dotenv.load_dotenv()
+
 resource = Resource(attributes={"service.name": "code-review-bot"})
 provider = TracerProvider(resource=resource)
-processor = SimpleSpanProcessor(ConsoleSpanExporter())
-provider.add_span_processor(processor)
+
+otlp_endpoint = os.getenv("OPENTELEMETRY_ENDPOINT")
+if otlp_endpoint:
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
+    provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+else:
+    processor = SimpleSpanProcessor(ConsoleSpanExporter())
+    provider.add_span_processor(processor)
+
 trace.set_tracer_provider(provider)
 
 Agent.instrument_all()
-dotenv.load_dotenv()
 
 openai_url = os.getenv("OPENAI_URL", "http://localhost:11434/v1")
 openai_api_key = os.getenv("OPENAI_API_KEY", "unused")
