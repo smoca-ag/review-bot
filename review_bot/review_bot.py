@@ -9,6 +9,7 @@ from typing import Literal
 
 import dotenv
 from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
@@ -30,13 +31,23 @@ dotenv.load_dotenv()
 resource = Resource(attributes={"service.name": "code-review-bot"})
 provider = TracerProvider(resource=resource)
 
-otlp_endpoint = os.getenv("OPENTELEMETRY_ENDPOINT")
+# 2. Check for the STANDARD OpenTelemetry environment variable
+otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+
 if otlp_endpoint:
+    # 3a. Variable IS defined: Setup HTTP Exporter
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-    otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
+    print(f"Standard OTLP endpoint detected: {otlp_endpoint}")
+
+    # Notice we leave the parentheses empty!
+    # The SDK automatically reads OTEL_EXPORTER_OTLP_ENDPOINT and applies it.
+    otlp_exporter = OTLPSpanExporter()
     provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+
 else:
+    # 3b. Variable IS NOT defined: Fallback to Console
+    print("No OTLP endpoint defined. Falling back to Console Output.")
     processor = SimpleSpanProcessor(ConsoleSpanExporter())
     provider.add_span_processor(processor)
 
