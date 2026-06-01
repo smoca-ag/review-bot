@@ -8,99 +8,95 @@ class BaseBackend:
         self.repo_dir = None
         self.container_name = None
 
-    def _is_safe_path(self, target_path: str) -> bool:
-        """
-        Validates that the provided path resolves strictly within the repo_dir.
-        Prevents directory traversal (e.g., '../') and absolute path escapes.
-        """
-        if not self.repo_dir:
-            return False
+    def load(self):
+        pass
 
-        base_dir = os.path.abspath(self.repo_dir)
-        # os.path.join ignores base_dir if target_path is an absolute path (e.g., '/etc')
-        full_path = os.path.abspath(os.path.join(base_dir, target_path))
+    def is_open(self) -> bool:
+        """
+        Returns True if the merge request is open and eligible for review.
+        """
+        return True
 
-        try:
-            # commonpath checks if the resolved path is a child of the base directory
-            return os.path.commonpath([base_dir, full_path]) == base_dir
-        except ValueError:
-            # commonpath raises ValueError if paths are on different drives (e.g., Windows)
-            return False
+    def is_draft(self) -> bool:
+        """
+        Returns True if the merge request is a draft/WIP.
+        """
+        return False
 
     def list_files(self, path="."):
-        if not self.repo_dir:
-            return "Repository not fetched locally."
-
-        if not self._is_safe_path(path):
-            return "Error: Invalid or restricted path."
+        if not getattr(self, "container_name", None):
+            return "Error: No active container found."
 
         try:
             output = subprocess.check_output(
-                ["ls", "-la", path], cwd=self.repo_dir, text=True
+                ["podman", "exec", self.container_name, "sh", "-c", f"ls -la '{path}'"],
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=30,
             )
             return output
+        except subprocess.TimeoutExpired:
+            return "Error: Command timed out after 30 seconds."
         except subprocess.CalledProcessError as e:
-            return f"Error listing files: {e}"
+            return f"Error listing files: {e.output.strip()}"
 
     def scan_code(self, pattern, path="."):
-        if not self.repo_dir:
-            return "Repository not fetched locally."
-
-        if not self._is_safe_path(path):
-            return "Error: Invalid or restricted path."
+        if not getattr(self, "container_name", None):
+            return "Error: No active container found."
 
         try:
             output = subprocess.check_output(
-                ["git", "grep", "-n", pattern, path], cwd=self.repo_dir, text=True
+                [
+                    "podman",
+                    "exec",
+                    self.container_name,
+                    "sh",
+                    "-c",
+                    f"git grep -n '{pattern}' '{path}'",
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=30,
             )
             return output
+        except subprocess.TimeoutExpired:
+            return "Error: Command timed out after 30 seconds."
         except subprocess.CalledProcessError as e:
             if e.returncode == 1:
                 return "No matches found."
-            return f"Error scanning code: {e}"
+            return f"Error scanning code: {e.output.strip()}"
 
-    def get_file(self, file_path, include_line_numbers=True):
+    def get_file_raw(self, file_path: str):
+        """Return raw file content (str or bytes) from the container without line-number formatting.
+
+        Used by the fetch_file_content tool for pagination and binary detection.
         """
-        Fetches the content of a file from the locally cloned repository.
-        Optionally prepends line numbers for LLM context.
-        """
-        if not getattr(self, "repo_dir", None):
-            return None
+        if not getattr(self, "container_name", None):
+            return "Error: No active container found."
 
-        if not self._is_safe_path(file_path):
-            if hasattr(self, "logger"):
-                self.logger.error(f"Unauthorized file access attempt: {file_path}")
-            return None
-
-        full_path = os.path.join(self.repo_dir, file_path)
         try:
-            with open(full_path, "r") as f:
-                content = f.read()
+            # Read file as bytes directly
+            output = subprocess.check_output(
+                [
+                    "podman",
+                    "exec",
+                    self.container_name,
+                    "cat",
+                    file_path,
+                ],
+                stderr=subprocess.STDOUT,
+                timeout=30,
+            )
+            return output
+        except subprocess.TimeoutExpired:
+            return "Error: Command timed out after 30 seconds."
+        except subprocess.CalledProcessError as e:
+            error_msg = e.output.decode("utf-8", errors="replace")
+            if "No such file" in error_msg or "cannot access" in error_msg:
+                return None
+            return f"Error reading file {file_path}: {error_msg.strip()}"
 
-            # Inject line numbers if requested by the LLM tool
-            if include_line_numbers:
-                numbered_lines = [
-                    f"{i + 1:4d} | {line}"
-                    for i, line in enumerate(content.splitlines())
-                ]
-                return "\n".join(numbered_lines)
-
-            return content
-
-        except Exception as e:
-            if hasattr(self, "logger"):
-                self.logger.error(
-                    f"Error reading file {file_path} from local repo: {e}"
-                )
-            return None
-
-    def get_files(self, paths):
-        paths_dict = {}
-        for path in paths:
-            paths_dict[path] = self.get_file(path)
-        return paths_dict
-
-    def setup_container(self, image="python:3.11-slim"):
+    def setup_container(self, image="python:3.11"):
         if not getattr(self, "repo_dir", None):
             if hasattr(self, "logger"):
                 self.logger.error("No repository directory to mount.")
@@ -118,7 +114,7 @@ class BaseBackend:
                 "--name",
                 self.container_name,
                 "-v",
-                f"{abs_repo_dir}:/workspace",
+                f"{abs_repo_dir}:/workspace:O",
                 "-w",
                 "/workspace",
                 image,

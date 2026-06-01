@@ -1,24 +1,25 @@
 # AI Code Reviewer for Git and GitLab
 
-This tool leverages local AI models, via [Ollama](https://ollama.com/), to perform automated code reviews. It can analyze changes in **GitLab Merge Requests (MRs)** or review local **`git diff`** outputs, posting findings as inline comments or printing them to the console.
+This tool leverages AI models via [Pydantic AI](https://ai.pydantic.dev/) to perform automated, multi-agent code reviews. It can analyze changes in **GitLab Merge Requests (MRs)** or review local **`git diff`** outputs, posting findings as inline comments or printing them to the console. It also includes a webhook server to automatically trigger reviews on GitLab events.
 
 ## Features
 
   - **Flexible Backends**: Works with remote GitLab MRs (`gitlab` backend) or local `git diff` outputs (`git` backend).
-  - **Automated Analysis**: Fetches MR details and diffs from GitLab or generates them locally from your git repository.
-  - **AI-Powered Review**: Uses a local AI model through Ollama to review code changes line-by-line.
-  - **Context-Aware**: Provides the AI with the full context of the changes (MR title, full diff, file contents) before reviewing individual lines.
+  - **Multi-Agent Architecture**: Uses specialized sub-agents (Security, Logic, Architecture, Context, QA, Performance) to review code concurrently, followed by a Critic agent that consolidates and filters out false positives.
+  - **Sandboxed Tool Execution**: The agents can fetch file contents, list directories, scan code, and execute shell commands inside an isolated Podman container to gather context safely.
   - **Inline Commenting**: For the `gitlab` backend, it posts findings as actionable inline comments in the MR.
-  - **Dry-Run Mode**: Allows you to see the review output in the console without posting to GitLab using the `--no-post` flag.
-  - **Configurable**: Easily configure the GitLab token, Ollama URL, and model via environment variables.
+  - **Webhook Server**: Automatically trigger reviews when a specific label is added or new commits are pushed to a GitLab MR.
+  - **Telemetry Support**: Export traces to an OpenTelemetry collector (via OTLP) to monitor the agent execution.
+  - **Configurable**: Easily configure the GitLab token, AI model URL, and model via environment variables.
 
 -----
 
 ## Requirements
 
-  - Python 3.8+
+  - Python 3.11+
   - Git installed and available in your PATH.
-  - A running instance of [Ollama](https://ollama.com/) with a suitable coding model (e.g., `qwen3-coder:30b`, `codellama`).
+  - [Podman](https://podman.io/) installed and running (used by the agents to safely execute commands and read files from the repository).
+  - An AI model provider (e.g., Anthropic, OpenAI, or a local instance of [Ollama](https://ollama.com/)).
   - For the `gitlab` backend: A GitLab Personal Access Token with `api` scope.
 
 -----
@@ -36,9 +37,9 @@ This tool leverages local AI models, via [Ollama](https://ollama.com/), to perfo
     It's recommended to use a virtual environment.
 
     ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-    pip install .
+    python -m venv .venv
+    source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
+    pip install -e .
     ```
     
 
@@ -51,10 +52,24 @@ This tool leverages local AI models, via [Ollama](https://ollama.com/), to perfo
     # Required only for the 'gitlab' backend
     GITLAB_API_TOKEN="your_gitlab_personal_access_token"
 
-    # Optional Ollama configuration
+    # Model configuration
     OPENAI_URL="http://localhost:11434/v1"
     OPENAI_MODEL="qwen3-coder:30b"
-    OPENAI_API_KEY="unused-for-oolama"
+    OPENAI_API_KEY="unused-for-ollama"
+    
+    # Alternatively, use Anthropic
+    # ANTHROPIC_DEFAULT_OPUS_MODEL="claude-3-7-sonnet-latest"
+    # ANTHROPIC_API_KEY="your_anthropic_api_key"
+
+    # Optional: OpenTelemetry tracing
+    # OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
+
+    # Webhook server configuration (if using review-bot-gitlab-webhook)
+    # WEBHOOK_HOST="0.0.0.0"
+    # WEBHOOK_PORT="8080"
+    # GITLAB_WEBHOOK_LABEL="ai-review-requested"
+    # GITLAB_WEBHOOK_REVIEW_ALL="false"
+    # GITLAB_WEBHOOK_TOKEN="your_secret_webhook_token"
     ```
 
 -----
@@ -64,71 +79,94 @@ This tool leverages local AI models, via [Ollama](https://ollama.com/), to perfo
 The script uses the following environment variables:
 
   - `GITLAB_API_TOKEN`: **Required for the `gitlab` backend only.** Your GitLab Personal Access Token. You can generate one from your GitLab profile under `Preferences > Access Tokens`. It needs the **`api` scope** to read MRs and post comments.
-  - `OPENAI_URL` (Optional): The URL for your running Ollama or OpenAPI instance. **Defaults to** `http://localhost:11434/v1`.
-  - `OPENAI_MODEL` (Optional): The name of the model to use. **Defaults to** `qwen3-coder:30b`. Ensure the model is downloaded first (`ollama pull <model_name>`).
-  - `OPENAI_API_KEY` (Optional): API Key if you need one for LLM Access
+  - `OPENAI_URL` (Optional): The URL for your running OpenAI-compatible instance (e.g. Ollama). **Defaults to** `http://localhost:11434/v1`.
+  - `OPENAI_MODEL` (Optional): The name of the model to use. **Defaults to** `qwen3-coder:30b`.
+  - `OPENAI_API_KEY` (Optional): API Key if you need one for LLM Access.
+  - `ANTHROPIC_DEFAULT_OPUS_MODEL` (Optional): If set, the bot will use the Anthropic provider with this model instead of OpenAI.
+  - `OPENTELEMETRY_ENDPOINT` (Optional): An OTLP HTTP endpoint to send traces to (e.g. `http://localhost:4318/v1/traces`).
 
 -----
 
 ## Usage
 
+The project provides two main executable scripts: `review-bot` (for manual reviews) and `review-bot-gitlab-webhook` (for automated reviews).
+
+### `review-bot`
+
 The script's behavior is controlled by the `--backend` argument, which determines how the `spec` argument is interpreted.
 
-### Arguments
-
-  - `spec`: (Required) The target for the review.
-      - For `gitlab` backend: The full URL of the Merge Request.
-      - For `git` backend: A valid argument for the `git diff` command (e.g., a commit range like `main..HEAD` or a single commit like `HEAD~1` or a branch like `origin/main`).
-  - `--backend`: (Optional) The backend to use. Choices are `gitlab` or `git`. **Defaults to `gitlab` if not specified.**
-  - `--no-post`: (Optional) A flag to disable posting comments to GitLab. In `git` mode, output is always printed to the console, but this flag can prevent other side effects if any were added.
-
------
-
-### Example 1: Review a GitLab Merge Request
-
-This command will review a specific GitLab MR and post comments.
-
 ```bash
-python main.py --backend gitlab "https://gitlab.example.com/group/project/-/merge_requests/123"
+usage: review-bot [-h] [--post] [--backend {gitlab,git}] spec
+
+AI Code Review for GitLab Merge Requests
+
+positional arguments:
+  spec                  Full Merge Request url or a argument for git diff
+
+options:
+  -h, --help            show this help message and exit
+  --post                Post the review directly to the merge request
+  --backend {gitlab,git}
+                        which backend to use, default to gitlab
 ```
 
-To see the review in the console without posting, add `--no-post`:
+#### Example 1: Review a GitLab Merge Request
+
+This command will review a specific GitLab MR and print findings to the console.
 
 ```bash
-python main.py --backend gitlab "https://gitlab.example.com/group/project/-/merge_requests/123" --no-post
+review-bot --backend gitlab "https://gitlab.example.com/group/project/-/merge_requests/123"
 ```
 
------
+To automatically post the findings as comments on the MR, add `--post`:
 
-### Example 2: Review Local Git Changes
+```bash
+review-bot --backend gitlab "https://gitlab.example.com/group/project/-/merge_requests/123" --post
+```
+
+#### Example 2: Review Local Git Changes
 
 This command will review the changes between your current branch and the `main` branch. The review will be printed to your terminal.
 
 ```bash
 # Make sure you are in the root directory of your git repository
-python main.py --backend git "origin/main"
+review-bot --backend git "origin/main"
 ```
 
 To review only the changes from the very last commit:
 
 ```bash
-python main.py --backend git "HEAD~1"
+review-bot --backend git "HEAD~1"
 ```
+
+### `review-bot-gitlab-webhook`
+
+This script starts an HTTP server that listens for GitLab webhook events. It automatically triggers the review process when specific conditions are met.
+
+```bash
+# Ensure GITLAB_WEBHOOK_TOKEN is set in your environment
+review-bot-gitlab-webhook
+```
+
+The webhook triggers a review when:
+1. The configured label (default: `ai-review-requested`) is added to the Merge Request.
+2. New commits are pushed to the Merge Request (and the label is already present).
+3. The Merge Request is opened or reopened (and the label is already present).
+
+If `GITLAB_WEBHOOK_REVIEW_ALL` is set to `true`, it will trigger on all new commits and MR opens, regardless of labels.
 
 -----
 
 ## How It Works
 
 1.  **Select Backend**: The script initializes either the `Gitlab` or `Git` backend based on the `--backend` argument.
-2.  **Fetch Data**:
-      - **GitLab**: Connects to the GitLab API to fetch the MR title, diff, and the full content of changed files.
-      - **Git**: Runs `git diff` and `git show` commands locally to get the diff and file contents.
-3.  **Build Context**: Creates a comprehensive prompt for the AI, including the changes' title/summary and the complete diff. This helps the AI understand the overall goal.
-4.  **Send Context**: The context is sent to the Ollama model in a persistent session, so the AI retains this information for subsequent questions.
-5.  **Iterate and Review**: The script processes the diff line by line. For each **added** line of code, it asks the AI to review that line within the given context.
-6.  **Parse and Display**: The AI's JSON response is parsed.
+2.  **Sandbox Initialization**: A Podman container is created, and the repository is mounted into it. This allows the AI agents to safely execute shell commands and read files.
+3.  **Multi-Agent Execution**: Six specialized sub-agents (Security, Logic, Architecture, Context, QA, Performance) are launched concurrently. They analyze the PR description and code diff, using tools to fetch additional context from the repository if needed.
+4.  **Critic Review**: The findings from all sub-agents are passed to a Critic agent. The Critic consolidates the reports, filters out duplicates, and ruthlessly drops false positives or low-confidence findings.
+5.  **Output**: The final, filtered findings are parsed.
       - For both backends, findings are logged to the console.
-      - For the `gitlab` backend (if not in `--no-post` mode), findings are posted as inline comments on the MR.
+      - For the `gitlab` backend (if `--post` is provided), findings are posted as inline comments on the MR.
+6.  **Cleanup**: The Podman container is destroyed.
 
 -----
 

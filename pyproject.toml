@@ -15,7 +15,8 @@ dependencies = [
     "openai==2.36.0",
     "beautifulsoup4==4.14.3",
     "pydantic_ai==1.92.0",
-    "opentelemetry-sdk==1.39.1"
+    "opentelemetry-sdk==1.39.1",
+    "opentelemetry-exporter-otlp==1.39.1"
 ]
 
 
