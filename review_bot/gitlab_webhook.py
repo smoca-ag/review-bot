@@ -305,6 +305,10 @@ def main():
     Main function to set up and run the webhook server.
     Returns an exit code (0 for success, 1 for failure).
     """
+    try:
+        multiprocessing.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
 
     # --- Logging Configuration ---
     # Configure logging here so it's only active when main() is called
