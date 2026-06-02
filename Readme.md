@@ -2,6 +2,7 @@
 
 This tool leverages AI models via [Pydantic AI](https://ai.pydantic.dev/) to perform automated, multi-agent code reviews. It can analyze changes in **GitLab Merge Requests (MRs)** or review local **`git diff`** outputs, posting findings as inline comments or printing them to the console. It also includes a webhook server to automatically trigger reviews on GitLab events.
 
+
 ## Features
 
   - **Flexible Backends**: Works with remote GitLab MRs (`gitlab` backend) or local `git diff` outputs (`git` backend).
