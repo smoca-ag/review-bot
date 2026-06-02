@@ -124,6 +124,25 @@ class Gitlab(BaseBackend):
             return None
         return response.json()
 
+    def get_paginated_response(self, url):
+        headers = {"PRIVATE-TOKEN": self.private_token}
+        results = []
+        while url:
+            response = requests.get(url, headers=headers)
+            if not response.ok:
+                self.logger.error(f"Error fetching {url}: {response}")
+                break
+
+            data = response.json()
+            if isinstance(data, list):
+                results.extend(data)
+            else:
+                # If it's not a list, pagination might not apply in the expected way
+                return data
+
+            url = response.links.get("next", {}).get("url")
+        return results
+
     def get_text_response(self, url):
         headers = {"PRIVATE-TOKEN": self.private_token}
         response = requests.get(url, headers=headers)
@@ -213,11 +232,11 @@ class Gitlab(BaseBackend):
 
     def get_discussion(self):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
-        return self.get_json_response(url)
+        return self.get_paginated_response(url)
 
     def get_draft_notes(self):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
-        return self.get_json_response(url)
+        return self.get_paginated_response(url)
 
     def post_line_review(self, text, old_path, new_path, old_position, new_position):
         if new_path == "/dev/null":
@@ -231,14 +250,16 @@ class Gitlab(BaseBackend):
             return pos if pos is not None else {}
 
         if any(
-            get_pos(d["notes"][0]).get("new_path") == new_path
-            and get_pos(d["notes"][0]).get("new_line") == new_position
-            and d["notes"][0].get("author", {}).get("id") == self.current_user_id
+            get_pos(note).get("new_path") == new_path
+            and get_pos(note).get("new_line") == new_position
+            and note.get("author", {}).get("id") == self.current_user_id
+            and note.get("body") == text
             for d in self.discussions
             if d.get("notes")
+            for note in d["notes"]
         ):
             self.logger.info(
-                f"Already a discussion by the bot on path {new_path} and position {new_position}"
+                f"Already a discussion by the bot on path {new_path} and position {new_position} with same text"
             )
             return
 
@@ -250,10 +271,11 @@ class Gitlab(BaseBackend):
                 note.get("author", {}).get("id") == self.current_user_id
                 or "author" not in note
             )
+            and note.get("note") == text
             for note in self.draft_notes
         ):
             self.logger.info(
-                f"Already a draft note by the bot on path {new_path} and position {new_position}"
+                f"Already a draft note by the bot on path {new_path} and position {new_position} with same text"
             )
             return
 

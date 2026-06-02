@@ -6,6 +6,8 @@ import os
 import sys
 import threading
 
+from opentelemetry import trace
+
 from review_bot import BackendType, review
 
 # --- Logger Setup ---
@@ -136,47 +138,56 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         """Handles incoming POST requests from GitLab."""
-        client_ip = self.client_address[0]
-        logger.info(f"Received POST request from {client_ip} to {self.path}")
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span("webhook_do_POST") as span:
+            client_ip = self.client_address[0]
+            span.set_attribute("http.client_ip", client_ip)
+            logger.info(f"Received POST request from {client_ip} to {self.path}")
 
-        if not self._validate_token():
-            return
+            if not self._validate_token():
+                span.set_status(trace.StatusCode.ERROR, "Invalid token")
+                return
 
-        try:
-            content_length = int(self.headers["Content-Length"])
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode("utf-8"))
-        except (TypeError, ValueError, json.JSONDecodeError) as e:
-            logger.error(
-                f"Error parsing JSON payload from {client_ip}: {e}", exc_info=True
-            )
-            self.send_response(400)  # Bad Request
+            try:
+                content_length = int(self.headers["Content-Length"])
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode("utf-8"))
+            except (TypeError, ValueError, json.JSONDecodeError) as e:
+                logger.error(
+                    f"Error parsing JSON payload from {client_ip}: {e}", exc_info=True
+                )
+                self.send_response(400)  # Bad Request
+                self.send_header("Content-type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"Bad Request: Could not parse JSON")
+                span.set_status(trace.StatusCode.ERROR, "Invalid JSON")
+                return
+            except Exception as e:
+                logger.error(
+                    f"Unknown error reading request from {client_ip}: {e}",
+                    exc_info=True,
+                )
+                self.send_response(500)  # Internal Server Error
+                self.end_headers()
+                span.set_status(trace.StatusCode.ERROR, "Internal Server Error")
+                return
+
+            self.send_response(200)
             self.send_header("Content-type", "text/plain")
             self.end_headers()
-            self.wfile.write(b"Bad Request: Could not parse JSON")
-            return
-        except Exception as e:
-            logger.error(
-                f"Unknown error reading request from {client_ip}: {e}", exc_info=True
-            )
-            self.send_response(500)  # Internal Server Error
-            self.end_headers()
-            return
+            self.wfile.write(b"Webhook received and accepted.")
 
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Webhook received and accepted.")
+            try:
+                self.handle_payload(data, span)
+            except Exception as e:
+                logger.error(f"Error in payload handling logic: {e}", exc_info=True)
+                span.set_status(trace.StatusCode.ERROR, "Payload handling error")
 
-        try:
-            self.handle_payload(data)
-        except Exception as e:
-            logger.error(f"Error in payload handling logic: {e}", exc_info=True)
-
-    def handle_payload(self, data):
+    def handle_payload(self, data, span):
         """Contains the main logic for checking the MR and its labels."""
 
         object_kind = data.get("object_kind")
+        span.set_attribute("gitlab.object_kind", str(object_kind))
         if object_kind != "merge_request":
             logger.info(f"Ignoring event: {object_kind}")
             return
