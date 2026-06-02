@@ -397,19 +397,18 @@ class Gitlab(BaseBackend):
         Fetches all pending draft notes and publishes them one by one via PUT.
         """
         base_url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
-        headers = {"PRIVATE-TOKEN": self.private_token}
 
         # 1. Fetch pending draft notes
-        get_resp = requests.get(base_url, headers=headers)
-        if not get_resp.ok:
+        notes = self.get_paginated_response(base_url)
+        if notes is None:
             self.logger.error("Could not fetch draft notes for debugging.")
             return
 
-        notes = get_resp.json()
         if not notes:
             self.logger.info("No draft notes found to publish.")
             return
 
+        headers = {"PRIVATE-TOKEN": self.private_token}
         # 2. Try publishing them one by one
         for note in notes:
             note_id = note.get("id")
@@ -417,6 +416,8 @@ class Gitlab(BaseBackend):
 
             # Note: Publishing a single draft note requires a PUT request, not POST.
             pub_resp = requests.put(pub_url, headers=headers)
+            del_url = f"{base_url}/{note_id}"
+            requests.delete(del_url, headers=headers)
 
             if pub_resp.ok:
                 self.logger.info(f"Successfully published draft note {note_id}.")
@@ -424,7 +425,6 @@ class Gitlab(BaseBackend):
                 self.logger.error(
                     f"FAILED to publish draft note {note_id}. Status: {pub_resp.status_code}"
                 )
-                requests.delete(pub_url, headers=headers)
                 self.logger.error(
                     f"Problematic note position data: {note.get('position', 'No position data found')}"
                 )
