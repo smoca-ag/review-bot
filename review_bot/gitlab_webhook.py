@@ -9,6 +9,7 @@ import threading
 from opentelemetry import trace
 
 from review_bot import BackendType, review
+from review_bot.telemetry import setup_telemetry
 
 # --- Logger Setup ---
 # Get a logger for this module.
@@ -16,6 +17,7 @@ from review_bot import BackendType, review
 logger = logging.getLogger(__name__)
 
 # --- Configuration (from Environment Variables) ---
+setup_telemetry()
 HOST = os.environ.get("WEBHOOK_HOST", "0.0.0.0")
 PORT = int(os.environ.get("WEBHOOK_PORT", "8080"))
 GITLAB_WEBHOOK_LABEL = os.environ.get("GITLAB_WEBHOOK_LABEL", "ai-review-requested")

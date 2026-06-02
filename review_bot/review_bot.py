@@ -9,51 +9,18 @@ from typing import Literal
 
 import dotenv
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import (
-    BatchSpanProcessor,
-    ConsoleSpanExporter,
-    SimpleSpanProcessor,
-)
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext, Tool
 from pydantic_ai.capabilities import Thinking, WebFetch, WebSearch
 
 import review_bot
+from review_bot.telemetry import setup_telemetry
 
 # ==========================================
 # 1. Telemetry & Environment Setup
 # ==========================================
 dotenv.load_dotenv()
-
-resource = Resource(attributes={"service.name": "code-review-bot"})
-provider = TracerProvider(resource=resource)
-
-# 2. Check for the STANDARD OpenTelemetry environment variable
-otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-
-if otlp_endpoint:
-    # 3a. Variable IS defined: Setup HTTP Exporter
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-
-    print(f"Standard OTLP endpoint detected: {otlp_endpoint}")
-
-    # Notice we leave the parentheses empty!
-    # The SDK automatically reads OTEL_EXPORTER_OTLP_ENDPOINT and applies it.
-    otlp_exporter = OTLPSpanExporter()
-    provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
-
-else:
-    # 3b. Variable IS NOT defined: Fallback to Console
-    print("No OTLP endpoint defined. Falling back to Console Output.")
-    processor = SimpleSpanProcessor(ConsoleSpanExporter())
-    provider.add_span_processor(processor)
-
-trace.set_tracer_provider(provider)
-
-Agent.instrument_all()
+setup_telemetry()
 
 openai_url = os.getenv("OPENAI_URL", "http://localhost:11434/v1")
 openai_api_key = os.getenv("OPENAI_API_KEY", "unused")
