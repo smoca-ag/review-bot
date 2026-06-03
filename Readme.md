@@ -2,6 +2,7 @@
 
 This tool leverages AI models via [Pydantic AI](https://ai.pydantic.dev/) to perform automated, multi-agent code reviews. It can analyze changes in **GitLab Merge Requests (MRs)** or review local **`git diff`** outputs, posting findings as inline comments or printing them to the console. It also includes a webhook server to automatically trigger reviews on GitLab events.
 
+
 ## Features
 
   - **Flexible Backends**: Works with remote GitLab MRs (`gitlab` backend) or local `git diff` outputs (`git` backend).
@@ -83,7 +84,7 @@ The script uses the following environment variables:
   - `OPENAI_MODEL` (Optional): The name of the model to use. **Defaults to** `qwen3-coder:30b`.
   - `OPENAI_API_KEY` (Optional): API Key if you need one for LLM Access.
   - `ANTHROPIC_DEFAULT_OPUS_MODEL` (Optional): If set, the bot will use the Anthropic provider with this model instead of OpenAI.
-  - `OPENTELEMETRY_ENDPOINT` (Optional): An OTLP HTTP endpoint to send traces to (e.g. `http://localhost:4318/v1/traces`).
+  - `OTEL_EXPORTER_OTLP_ENDPOINT` (Optional): An OTLP HTTP endpoint to send traces to (e.g. `http://localhost:4318/v1/traces`).
 
 -----
 

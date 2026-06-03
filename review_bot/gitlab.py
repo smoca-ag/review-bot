@@ -124,6 +124,25 @@ class Gitlab(BaseBackend):
             return None
         return response.json()
 
+    def get_paginated_response(self, url):
+        headers = {"PRIVATE-TOKEN": self.private_token}
+        results = []
+        while url:
+            response = requests.get(url, headers=headers)
+            if not response.ok:
+                self.logger.error(f"Error fetching {url}: {response}")
+                break
+
+            data = response.json()
+            if isinstance(data, list):
+                results.extend(data)
+            else:
+                # If it's not a list, pagination might not apply in the expected way
+                return data
+
+            url = response.links.get("next", {}).get("url")
+        return results
+
     def get_text_response(self, url):
         headers = {"PRIVATE-TOKEN": self.private_token}
         response = requests.get(url, headers=headers)
@@ -213,11 +232,11 @@ class Gitlab(BaseBackend):
 
     def get_discussion(self):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
-        return self.get_json_response(url)
+        return self.get_paginated_response(url)
 
     def get_draft_notes(self):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
-        return self.get_json_response(url)
+        return self.get_paginated_response(url)
 
     def post_line_review(self, text, old_path, new_path, old_position, new_position):
         if new_path == "/dev/null":
@@ -231,14 +250,16 @@ class Gitlab(BaseBackend):
             return pos if pos is not None else {}
 
         if any(
-            get_pos(d["notes"][0]).get("new_path") == new_path
-            and get_pos(d["notes"][0]).get("new_line") == new_position
-            and d["notes"][0].get("author", {}).get("id") == self.current_user_id
+            get_pos(note).get("new_path") == new_path
+            and get_pos(note).get("new_line") == new_position
+            and note.get("author", {}).get("id") == self.current_user_id
+            and note.get("body") == text
             for d in self.discussions
             if d.get("notes")
+            for note in d["notes"]
         ):
             self.logger.info(
-                f"Already a discussion by the bot on path {new_path} and position {new_position}"
+                f"Already a discussion by the bot on path {new_path} and position {new_position} with same text"
             )
             return
 
@@ -250,10 +271,11 @@ class Gitlab(BaseBackend):
                 note.get("author", {}).get("id") == self.current_user_id
                 or "author" not in note
             )
+            and note.get("note") == text
             for note in self.draft_notes
         ):
             self.logger.info(
-                f"Already a draft note by the bot on path {new_path} and position {new_position}"
+                f"Already a draft note by the bot on path {new_path} and position {new_position} with same text"
             )
             return
 
@@ -375,19 +397,18 @@ class Gitlab(BaseBackend):
         Fetches all pending draft notes and publishes them one by one via PUT.
         """
         base_url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
-        headers = {"PRIVATE-TOKEN": self.private_token}
 
         # 1. Fetch pending draft notes
-        get_resp = requests.get(base_url, headers=headers)
-        if not get_resp.ok:
+        notes = self.get_paginated_response(base_url)
+        if notes is None:
             self.logger.error("Could not fetch draft notes for debugging.")
             return
 
-        notes = get_resp.json()
         if not notes:
             self.logger.info("No draft notes found to publish.")
             return
 
+        headers = {"PRIVATE-TOKEN": self.private_token}
         # 2. Try publishing them one by one
         for note in notes:
             note_id = note.get("id")
@@ -395,6 +416,8 @@ class Gitlab(BaseBackend):
 
             # Note: Publishing a single draft note requires a PUT request, not POST.
             pub_resp = requests.put(pub_url, headers=headers)
+            del_url = f"{base_url}/{note_id}"
+            requests.delete(del_url, headers=headers)
 
             if pub_resp.ok:
                 self.logger.info(f"Successfully published draft note {note_id}.")
@@ -402,7 +425,6 @@ class Gitlab(BaseBackend):
                 self.logger.error(
                     f"FAILED to publish draft note {note_id}. Status: {pub_resp.status_code}"
                 )
-                requests.delete(pub_url, headers=headers)
                 self.logger.error(
                     f"Problematic note position data: {note.get('position', 'No position data found')}"
                 )
