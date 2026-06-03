@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal
 
+import chromadb
 import dotenv
 from opentelemetry import trace
 from pydantic import BaseModel, Field
@@ -76,6 +77,103 @@ def inject_line_numbers(diff_text: str) -> str:
     return "\n".join(result)
 
 
+def _chunk_text(
+    text: str, file_path: str, chunk_size: int = 500, overlap: int = 50
+) -> list[tuple[str, str, int]]:
+    """Split text into overlapping chunks suitable for embedding.
+
+    Args:
+        text: The file content to chunk.
+        file_path: The file path (for metadata).
+        chunk_size: Maximum lines per chunk.
+        overlap: Number of lines to overlap between chunks.
+
+    Returns:
+        List of (chunk_id, chunk_text, start_line) tuples.
+    """
+    lines = text.splitlines()
+    chunks: list[tuple[str, str, int]] = []
+
+    if not lines:
+        return chunks
+
+    i = 0
+    while i < len(lines):
+        chunk_lines = lines[i : i + chunk_size]
+        chunk_text = "\n".join(chunk_lines)
+        chunk_id = f"{file_path}:chunk-{i // chunk_size}"
+        chunks.append((chunk_id, chunk_text, i + 1))  # 1-based line number
+        i += chunk_size - overlap  # Overlap by 'overlap' lines
+
+    return chunks
+
+
+def _build_vector_index(repo_dir: str, collection) -> int:
+    """Walk repo_dir, chunk source files, and add to ChromaDB collection.
+
+    Returns the number of chunks added.
+    """
+    source_extensions = {
+        ".py",
+        ".js",
+        ".ts",
+        ".tsx",
+        ".go",
+        ".rs",
+        ".java",
+        ".c",
+        ".cpp",
+        ".h",
+        ".hpp",
+        ".rb",
+        ".php",
+        ".swift",
+        ".kt",
+        ".scala",
+        ".sh",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".json",
+        ".md",
+    }
+    count = 0
+
+    for root, _, files in os.walk(repo_dir):
+        for f in files:
+            ext = os.path.splitext(f)[1].lower()
+            if ext not in source_extensions:
+                continue
+
+            file_path = os.path.join(root, f)
+            rel_path = os.path.relpath(file_path, repo_dir)
+
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as fh:
+                    text = fh.read()
+            except (IOError, OSError):
+                continue
+
+            # Skip very large files (>1000 lines)
+            if text.count("\n") > 1000:
+                continue
+
+            chunks = _chunk_text(text, rel_path)
+            if chunks:
+                ids, documents, metadatas = zip(*chunks)
+                collection.add(
+                    ids=ids,
+                    documents=documents,
+                    metadatas=[
+                        {"file": rel_path, "lines": start_line}
+                        for _, _, start_line in chunks
+                    ],
+                )
+                count += len(chunks)
+
+    return count
+
+
 # ==========================================
 # 3. Schemas & Dependencies
 # ==========================================
@@ -83,6 +181,7 @@ def inject_line_numbers(diff_text: str) -> str:
 class ReviewDeps:
     mr_request: any
     mr_description: str
+    vector_index: any  # ChromaDB collection for semantic search
 
 
 class LineComment(BaseModel):
@@ -328,11 +427,64 @@ def execute_command(
         return f"Error executing command: {str(e)}"
 
 
+def vector_search(
+    ctx: RunContext[ReviewDeps],
+    query: str,
+    top_k: int = 5,
+) -> str:
+    """Search the codebase semantically for relevant code chunks.
+
+    Use this when you need to find code with similar semantics, patterns, or
+    functionality that keyword search might miss. For example:
+    - "How is authentication handled in this codebase?"
+    - "Find similar error handling patterns"
+    - "Where is database connection configured?"
+
+    Args:
+        query: Natural language description of what you're looking for.
+        top_k: Number of results to return (default 5).
+
+    Returns:
+        Formatted string with relevant code chunks.
+    """
+    collection = ctx.deps.vector_index
+    if collection is None:
+        return "Vector search is not available (index not built)."
+
+    try:
+        results = collection.query(
+            query_texts=[query],
+            n_results=top_k,
+        )
+
+        docs = results["documents"][0]
+        if not docs:
+            return "No relevant code chunks found."
+
+        output_parts = []
+        for doc, meta, dist in zip(
+            docs,
+            results["metadatas"][0],
+            results["distances"][0],
+        ):
+            # ChromaDB returns distances; for cosine distance, lower is more similar
+            similarity = 1.0 - dist
+            output_parts.append(
+                f"File: {meta['file']} (Line ~{meta['lines']}, Similarity: {similarity:.2f})\n"
+                f"```\n{doc}\n```"
+            )
+
+        return "\n---\n".join(output_parts)
+    except Exception as e:
+        return f"Error searching vector index: {str(e)}"
+
+
 shared_tools = [
     Tool(fetch_file_content),
     Tool(list_files),
     Tool(scan_code),
     Tool(execute_command),
+    Tool(vector_search),
 ]
 
 # ==========================================
@@ -472,11 +624,17 @@ async def run_agent_with_span(agent_name, agent, prompt, deps):
         return await agent.run(prompt, deps=deps)
 
 
-async def async_review_process(logger, mr_request, mr_description, secure_prompt, post):
+async def async_review_process(
+    logger, mr_request, mr_description, secure_prompt, post, vector_index=None
+):
     """Executes the sub-agents concurrently, then runs the critic."""
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span("async_review_process"):
-        deps = ReviewDeps(mr_request=mr_request, mr_description=mr_description)
+        deps = ReviewDeps(
+            mr_request=mr_request,
+            mr_description=mr_description,
+            vector_index=vector_index,
+        )
 
         logger.info(
             "🚀 Launching 6 specialized agents concurrently (Security, Logic, Architecture, Context, QA, Performance)..."
@@ -504,6 +662,7 @@ async def async_review_process(logger, mr_request, mr_description, secure_prompt
         critic_deps = CriticDeps(
             mr_request=mr_request,
             mr_description=mr_description,
+            vector_index=vector_index,
             security_report=sec_res.output,
             logic_report=log_res.output,
             context_report=ctx_res.output,
@@ -665,6 +824,24 @@ def review(spec, backend, post=False):
 
         mr_request.setup_container()
 
+        # Build vector index for semantic search
+        vector_index = None
+        try:
+            client = chromadb.Client()
+            collection = client.create_collection("codebase")
+            indexed_count = _build_vector_index(mr_request.repo_dir, collection)
+            if indexed_count > 0:
+                vector_index = collection
+                logger.info(
+                    f"Built vector index with {indexed_count} chunks from {mr_request.repo_dir}"
+                )
+            else:
+                logger.info("No source files found for vector indexing.")
+        except Exception as e:
+            logger.warning(
+                f"Failed to build vector index: {e}. Vector search will be unavailable."
+            )
+
         try:
             diff_content = mr_request.diff()
             mr_description = mr_request.description() or "No description provided."
@@ -680,7 +857,12 @@ def review(spec, backend, post=False):
             # Trigger the async multi-agent flow
             asyncio.run(
                 async_review_process(
-                    logger, mr_request, mr_description, secure_prompt, post
+                    logger,
+                    mr_request,
+                    mr_description,
+                    secure_prompt,
+                    post,
+                    vector_index,
                 )
             )
         except Exception as e:
