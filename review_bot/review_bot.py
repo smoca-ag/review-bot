@@ -78,7 +78,7 @@ def inject_line_numbers(diff_text: str) -> str:
 
 
 def _chunk_text(
-    text: str, file_path: str, chunk_size: int = 500, overlap: int = 50
+    text: str, file_path: str, chunk_size: int = 50, overlap: int = 10
 ) -> list[tuple[str, str, int]]:
     """Split text into overlapping chunks suitable for embedding.
 

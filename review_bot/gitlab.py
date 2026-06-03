@@ -70,32 +70,22 @@ class Gitlab(BaseBackend):
         self.current_user_id = self.get_current_user_id()
         self.versions = self.get_versions()
         self.discussions = self.get_discussion()
-        self.draft_notes = self.get_draft_notes() or []
         self.clear_existing_draft_notes()
-        self.draft_notes = self.get_draft_notes() or []
         self.diff_response = self.get_merge_request_diff()
         self.mr = self.get_mr()
         self.fetch_repository()
 
     def clear_existing_draft_notes(self):
-        if not self.draft_notes:
-            return
+        draft_notes = self.get_draft_notes()
         base_url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
         headers = {"PRIVATE-TOKEN": self.private_token}
-        for note in self.draft_notes:
+        for note in draft_notes:
             if note.get("author", {}).get("id") == self.current_user_id:
                 note_id = note.get("id")
                 del_url = f"{base_url}/{note_id}"
                 resp = requests.delete(del_url, headers=headers)
                 if not resp.ok:
                     self.logger.error(f"Failed to delete stale draft note {note_id}")
-
-        # Keep only draft notes from other users
-        self.draft_notes = [
-            n
-            for n in self.draft_notes
-            if n.get("author", {}).get("id") != self.current_user_id
-        ]
 
     def get_current_user_id(self):
         user_url = f"{self.gitlab_url}/api/v4/user"
@@ -286,22 +276,6 @@ class Gitlab(BaseBackend):
             )
             return
 
-        # Ensure we aren't doubling up on draft notes
-        if any(
-            get_pos(note).get("new_path") == new_path
-            and get_pos(note).get("new_line") == new_position
-            and (
-                note.get("author", {}).get("id") == self.current_user_id
-                or "author" not in note
-            )
-            and normalize_text(note.get("note")) == normalize_text(text)
-            for note in self.draft_notes
-        ):
-            self.logger.info(
-                f"Already a draft note by the bot on path {new_path} and position {new_position} with same text"
-            )
-            return
-
         position = {
             "new_path": new_path,
             "old_path": old_path,
@@ -323,8 +297,6 @@ class Gitlab(BaseBackend):
         response = requests.post(url, headers=headers, json=payload)
         if not response.ok:
             self.logger.error(f"Error posting inline draft note to GitLab: {response}")
-        else:
-            self.draft_notes.append(payload)
 
     def post_review(self, text):
         headers = {
@@ -412,25 +384,16 @@ class Gitlab(BaseBackend):
                 f"Error bulk-publishing draft notes to GitLab: {response.text}"
             )
             self.publish_individually()
-            self.clear_existing_draft_notes()
         else:
             self.logger.info("Successfully published all draft notes.")
+        self.clear_existing_draft_notes()
+
 
     def publish_individually(self):
         """
         Fetches all pending draft notes and publishes them one by one via PUT.
         """
-        base_url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
-
-        # 1. Fetch pending draft notes
-        notes = self.get_paginated_response(base_url)
-        if notes is None:
-            self.logger.error("Could not fetch draft notes for debugging.")
-            return
-
-        if not notes:
-            self.logger.info("No draft notes found to publish.")
-            return
+        notes = self.get_draft_notes()
 
         headers = {"PRIVATE-TOKEN": self.private_token}
         # 2. Try publishing them one by one
