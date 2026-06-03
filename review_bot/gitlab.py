@@ -57,6 +57,7 @@ class Gitlab(BaseBackend):
         self.current_user_id = self.get_current_user_id()
         self.versions = self.get_versions()
         self.discussions = self.get_discussion()
+        self.draft_notes = self.get_draft_notes() or []
         self.clear_existing_draft_notes()
         self.draft_notes = self.get_draft_notes() or []
         self.diff_response = self.get_merge_request_diff()
