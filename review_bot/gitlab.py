@@ -57,8 +57,8 @@ class Gitlab(BaseBackend):
         self.current_user_id = self.get_current_user_id()
         self.versions = self.get_versions()
         self.discussions = self.get_discussion()
-        self.draft_notes = self.get_draft_notes() or []
         self.clear_existing_draft_notes()
+        self.draft_notes = self.get_draft_notes() or []
         self.diff_response = self.get_merge_request_diff()
         self.mr = self.get_mr()
         self.fetch_repository()
@@ -389,6 +389,7 @@ class Gitlab(BaseBackend):
                 f"Error bulk-publishing draft notes to GitLab: {response.text}"
             )
             self.publish_individually()
+            self.clear_existing_draft_notes()
         else:
             self.logger.info("Successfully published all draft notes.")
 
@@ -417,9 +418,9 @@ class Gitlab(BaseBackend):
             # Note: Publishing a single draft note requires a PUT request, not POST.
             pub_resp = requests.put(pub_url, headers=headers)
             del_url = f"{base_url}/{note_id}"
-            requests.delete(del_url, headers=headers)
 
             if pub_resp.ok:
+                requests.delete(del_url, headers=headers)
                 self.logger.info(f"Successfully published draft note {note_id}.")
             else:
                 self.logger.error(
