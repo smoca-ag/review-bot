@@ -242,19 +242,27 @@ class Gitlab(BaseBackend):
     def post_line_review(self, text, old_path, new_path, old_position, new_position):
         if new_path == "/dev/null":
             new_path = None
+        elif new_path:
+            new_path = new_path.lstrip("/")
+
         if old_path == "/dev/null":
             old_path = None
+        elif old_path:
+            old_path = old_path.lstrip("/")
 
         # Ensure we aren't doubling up on discussions
         def get_pos(note):
             pos = note.get("position")
             return pos if pos is not None else {}
 
+        def normalize_text(t):
+            return t.replace("\r\n", "\n").strip() if t else ""
+
         if any(
             get_pos(note).get("new_path") == new_path
             and get_pos(note).get("new_line") == new_position
             and note.get("author", {}).get("id") == self.current_user_id
-            and note.get("body") == text
+            and normalize_text(note.get("body")) == normalize_text(text)
             for d in self.discussions
             if d.get("notes")
             for note in d["notes"]
@@ -272,7 +280,7 @@ class Gitlab(BaseBackend):
                 note.get("author", {}).get("id") == self.current_user_id
                 or "author" not in note
             )
-            and note.get("note") == text
+            and normalize_text(note.get("note")) == normalize_text(text)
             for note in self.draft_notes
         ):
             self.logger.info(
@@ -418,12 +426,12 @@ class Gitlab(BaseBackend):
 
             # Note: Publishing a single draft note requires a PUT request, not POST.
             pub_resp = requests.put(pub_url, headers=headers)
-            del_url = f"{base_url}/{note_id}"
 
             if pub_resp.ok:
-                requests.delete(del_url, headers=headers)
                 self.logger.info(f"Successfully published draft note {note_id}.")
             else:
+                del_url = f"{base_url}/{note_id}"
+                requests.delete(del_url, headers=headers)
                 self.logger.error(
                     f"FAILED to publish draft note {note_id}. Status: {pub_resp.status_code}"
                 )
