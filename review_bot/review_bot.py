@@ -599,11 +599,18 @@ async def async_review_process(logger, mr_request, mr_description, secure_prompt
             + "\n".join(f"- {f}" for f in review_result.actionable_feedback)
             + "\n\n"
         )
+
     if review_result.critical_line_comments:
         markdown_comment += (
-                "## 🛠️ Code Feedback\n"
-                + "\n".join(f"- {comment.file}:{comment.line} (Confidence {comment.confidence_score}): **{comment.severity.upper()} ({comment.category})**: {comment.comment}" for comment in review_result.critical_line_comments)
-                + "\n\n"
+            "## 📌 Inline Comments\n"
+            + "\n".join(
+                f"- {comment.file}:{comment.line} "
+                f"(Confidence {comment.confidence_score}): "
+                f"**{comment.severity.upper()} ({comment.category})**: "
+                f"{comment.comment}"
+                for comment in review_result.critical_line_comments
+            )
+            + "\n\n"
         )
 
     # Post filtered line-by-line comments

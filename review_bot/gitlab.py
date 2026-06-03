@@ -35,7 +35,20 @@ def extract_gitlab_info(url):
             mr_id = path_parts[i + 1]
             break
 
-    return [f"{protocol}://{host}", quote(project_path, safe=""), int(mr_id)]
+    if mr_id is None:
+        raise ValueError(
+            f"Could not extract merge request ID from URL: {url}. "
+            f"Expected URL format: https://gitlab.example.com/group/project/-/merge_requests/19"
+        )
+
+    try:
+        mr_id = int(mr_id)
+    except (ValueError, TypeError):
+        raise ValueError(
+            f"Invalid merge request ID '{mr_id}' in URL: {url}. Expected a numeric ID."
+        )
+
+    return [f"{protocol}://{host}", quote(project_path, safe=""), mr_id]
 
 
 class Gitlab(BaseBackend):
@@ -258,12 +271,13 @@ class Gitlab(BaseBackend):
         def normalize_text(t):
             return t.replace("\r\n", "\n").strip() if t else ""
 
+        discussions = getattr(self, "discussions", None) or []
         if any(
             get_pos(note).get("new_path") == new_path
             and get_pos(note).get("new_line") == new_position
             and note.get("author", {}).get("id") == self.current_user_id
             and normalize_text(note.get("body")) == normalize_text(text)
-            for d in self.discussions
+            for d in discussions
             if d.get("notes")
             for note in d["notes"]
         ):
