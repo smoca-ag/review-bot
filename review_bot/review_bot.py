@@ -599,8 +599,12 @@ async def async_review_process(logger, mr_request, mr_description, secure_prompt
             + "\n".join(f"- {f}" for f in review_result.actionable_feedback)
             + "\n\n"
         )
-
-    logger.info("Markdown Output Generated:\n" + markdown_comment)
+    if review_result.critical_line_comment:
+        markdown_comment += (
+                "## 🛠️ Code Feedback\n"
+                + "\n".join(f"- {comment.file}:{comment.line} (Confidence {comment.confidence_score}): **{comment.severity.upper()} ({comment.category})**: {comment.comment}" for comment in review_result.critical_line_comment)
+                + "\n\n"
+        )
 
     # Post filtered line-by-line comments
     seen_comments = set()
@@ -616,6 +620,7 @@ async def async_review_process(logger, mr_request, mr_description, secure_prompt
         )
         if post:
             mr_request.post_line_review(text, None, comment.file, None, comment.line)
+    logger.info("Markdown Output Generated:\n" + markdown_comment)
 
     if post:
         mr_request.post_review(markdown_comment)
