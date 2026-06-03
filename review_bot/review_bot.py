@@ -101,7 +101,7 @@ def _chunk_text(
     while i < len(lines):
         chunk_lines = lines[i : i + chunk_size]
         chunk_text = "\n".join(chunk_lines)
-        chunk_id = f"{file_path}:chunk-{i // chunk_size}"
+        chunk_id = f"{file_path}:chunk-{i}"
         chunks.append((chunk_id, chunk_text, i + 1))  # 1-based line number
         i += chunk_size - overlap  # Overlap by 'overlap' lines
 
@@ -162,8 +162,8 @@ def _build_vector_index(repo_dir: str, collection) -> int:
             if chunks:
                 ids, documents, metadatas = zip(*chunks)
                 collection.add(
-                    ids=ids,
-                    documents=documents,
+                    ids=list(ids),
+                    documents=list(documents),
                     metadatas=[
                         {"file": rel_path, "lines": start_line}
                         for _, _, start_line in chunks
@@ -625,7 +625,7 @@ async def run_agent_with_span(agent_name, agent, prompt, deps):
 
 
 async def async_review_process(
-    logger, mr_request, mr_description, secure_prompt, post, vector_index=None
+    logger, mr_request, mr_description, secure_prompt, post, vector_index
 ):
     """Executes the sub-agents concurrently, then runs the critic."""
     tracer = trace.get_tracer(__name__)
@@ -830,6 +830,7 @@ def review(spec, backend, post=False):
             client = chromadb.Client()
             collection = client.create_collection("codebase")
             indexed_count = _build_vector_index(mr_request.repo_dir, collection)
+
             if indexed_count > 0:
                 vector_index = collection
                 logger.info(

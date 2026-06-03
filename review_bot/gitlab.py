@@ -266,13 +266,12 @@ class Gitlab(BaseBackend):
             get_pos(note).get("new_path") == new_path
             and get_pos(note).get("new_line") == new_position
             and note.get("author", {}).get("id") == self.current_user_id
-            and normalize_text(note.get("body")) == normalize_text(text)
             for d in discussions
             if d.get("notes")
             for note in d["notes"]
         ):
             self.logger.info(
-                f"Already a discussion by the bot on path {new_path} and position {new_position} with same text"
+                f"Already a discussion by the bot on path {new_path} and position {new_position}"
             )
             return
 
@@ -394,7 +393,7 @@ class Gitlab(BaseBackend):
         Fetches all pending draft notes and publishes them one by one via PUT.
         """
         notes = self.get_draft_notes()
-
+        base_url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
         headers = {"PRIVATE-TOKEN": self.private_token}
         # 2. Try publishing them one by one
         for note in notes:
