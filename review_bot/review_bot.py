@@ -17,6 +17,7 @@ from pydantic_ai.capabilities import Thinking, WebFetch, WebSearch
 import review_bot
 from review_bot.telemetry import setup_telemetry
 
+
 # ==========================================
 # 1. Telemetry & Environment Setup
 # ==========================================
@@ -155,7 +156,7 @@ def _build_vector_index(repo_dir: str, collection) -> int:
                 continue
 
             # Skip very large files (>1000 lines)
-            if text.count("\n") > 1000:
+            if text.count("\n") > 1000 or len(text) > 500_000:
                 continue
 
             chunks = _chunk_text(text, rel_path)

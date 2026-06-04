@@ -258,15 +258,12 @@ class Gitlab(BaseBackend):
             pos = note.get("position")
             return pos if pos is not None else {}
 
-        def normalize_text(t):
-            return t.replace("\r\n", "\n").strip() if t else ""
 
-        discussions = getattr(self, "discussions", None) or []
         if any(
             get_pos(note).get("new_path") == new_path
             and get_pos(note).get("new_line") == new_position
             and note.get("author", {}).get("id") == self.current_user_id
-            for d in discussions
+            for d in self.discussions
             if d.get("notes")
             for note in d["notes"]
         ):
