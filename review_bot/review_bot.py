@@ -17,7 +17,6 @@ from pydantic_ai.capabilities import Thinking, WebFetch, WebSearch
 import review_bot
 from review_bot.telemetry import setup_telemetry
 
-
 # ==========================================
 # 1. Telemetry & Environment Setup
 # ==========================================
@@ -559,6 +558,7 @@ test_agent = Agent(
         "You are a QA and Test Automation Engineer. Your ONLY job is to evaluate test coverage and edge cases.\n"
         "- Identify edge cases, boundary conditions, and race conditions that the current code/tests miss.\n"
         "- Review existing tests in the diff to ensure they actually assert meaningful outcomes (no 'happy path only' tests).\n"
+        "- If the project has no tests at all, return an empty findings list.\n"
         "- IGNORE general logic bugs outside of testing, architecture, styling, and security.\n"
         + SUB_AGENT_SHIELD
     ),
