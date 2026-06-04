@@ -237,7 +237,7 @@ class ArchitectureReport(BaseModel):
 
 class TestReport(BaseModel):
     findings: list[LineComment] = Field(
-        description="Specific, critical flaws in test logic (e.g., tests that always pass). Empty if none."
+        description="Specific, critical flaws in test logic (e.g., tests that always pass). Empty if none. NOT missing tests."
     )
     testing_feedback: list[str] = Field(
         description="High-level feedback on missing test cases, edge cases, or gaps in test coverage."
