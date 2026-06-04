@@ -172,6 +172,10 @@ class Gitlab(BaseBackend):
         import tempfile
         import urllib.parse
 
+        from opentelemetry import trace
+
+        tracer = trace.get_tracer(__name__)
+
         self.repo_dir = tempfile.mkdtemp()
 
         project = self.get_project()
@@ -185,25 +189,16 @@ class Gitlab(BaseBackend):
             netloc=f"oauth2:{self.private_token}@{parsed.netloc}"
         ).geturl()
 
-        subprocess.check_call(["git", "init", self.repo_dir])
-        subprocess.check_call(
-            ["git", "remote", "add", "origin", clone_url], cwd=self.repo_dir
-        )
+        with tracer.start_as_current_span("project_checkout") as span:
+            span.set_attribute("gitlab.project_id", self.project_id)
+            span.set_attribute("gitlab.merge_request_iid", self.merge_request_iid)
+            span.set_attribute("gitlab.repo_dir", self.repo_dir)
 
-        subprocess.check_call(
-            [
-                "git",
-                "fetch",
-                "--depth",
-                "1",
-                "origin",
-                f"refs/merge-requests/{self.merge_request_iid}/head:mr-head",
-            ],
-            cwd=self.repo_dir,
-        )
+            subprocess.check_call(["git", "init", self.repo_dir])
+            subprocess.check_call(
+                ["git", "remote", "add", "origin", clone_url], cwd=self.repo_dir
+            )
 
-        target_branch = self.mr.get("target_branch")
-        if target_branch:
             subprocess.check_call(
                 [
                     "git",
@@ -211,12 +206,26 @@ class Gitlab(BaseBackend):
                     "--depth",
                     "1",
                     "origin",
-                    f"refs/heads/{target_branch}:target-branch",
+                    f"refs/merge-requests/{self.merge_request_iid}/head:mr-head",
                 ],
                 cwd=self.repo_dir,
             )
 
-        subprocess.check_call(["git", "checkout", "mr-head"], cwd=self.repo_dir)
+            target_branch = self.mr.get("target_branch")
+            if target_branch:
+                subprocess.check_call(
+                    [
+                        "git",
+                        "fetch",
+                        "--depth",
+                        "1",
+                        "origin",
+                        f"refs/heads/{target_branch}:target-branch",
+                    ],
+                    cwd=self.repo_dir,
+                )
+
+            subprocess.check_call(["git", "checkout", "mr-head"], cwd=self.repo_dir)
 
     def cleanup(self):
         import shutil
@@ -257,7 +266,6 @@ class Gitlab(BaseBackend):
         def get_pos(note):
             pos = note.get("position")
             return pos if pos is not None else {}
-
 
         if any(
             get_pos(note).get("new_path") == new_path
@@ -383,7 +391,6 @@ class Gitlab(BaseBackend):
         else:
             self.logger.info("Successfully published all draft notes.")
         self.clear_existing_draft_notes()
-
 
     def publish_individually(self):
         """

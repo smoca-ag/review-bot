@@ -827,22 +827,27 @@ def review(spec, backend, post=False):
 
         # Build vector index for semantic search
         vector_index = None
-        try:
-            client = chromadb.Client()
-            collection = client.create_collection("codebase")
-            indexed_count = _build_vector_index(mr_request.repo_dir, collection)
+        with tracer.start_as_current_span("rag_setup") as span:
+            span.set_attribute("rag.repo_dir", mr_request.repo_dir)
+            try:
+                client = chromadb.Client()
+                collection = client.create_collection("codebase")
+                indexed_count = _build_vector_index(mr_request.repo_dir, collection)
 
-            if indexed_count > 0:
-                vector_index = collection
-                logger.info(
-                    f"Built vector index with {indexed_count} chunks from {mr_request.repo_dir}"
+                if indexed_count > 0:
+                    vector_index = collection
+                    logger.info(
+                        f"Built vector index with {indexed_count} chunks from {mr_request.repo_dir}"
+                    )
+                    span.set_attribute("rag.indexed_chunks", indexed_count)
+                else:
+                    logger.info("No source files found for vector indexing.")
+                    span.set_attribute("rag.indexed_chunks", 0)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to build vector index: {e}. Vector search will be unavailable."
                 )
-            else:
-                logger.info("No source files found for vector indexing.")
-        except Exception as e:
-            logger.warning(
-                f"Failed to build vector index: {e}. Vector search will be unavailable."
-            )
+                span.set_attribute("rag.error", str(e))
 
         try:
             diff_content = mr_request.diff()
