@@ -279,7 +279,6 @@ class Gitlab(BaseBackend):
         position = {k: v for k, v in position.items() if v is not None}
 
         payload = {"body": text, "position": position}
-        print(json.dumps(payload))
 
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         headers = {
