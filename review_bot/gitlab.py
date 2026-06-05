@@ -1,3 +1,4 @@
+import json
 import os
 from urllib.parse import quote, urlparse
 
@@ -235,17 +236,14 @@ class Gitlab(BaseBackend):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         return self.get_paginated_response(url)
 
+    def post_line_review(self, text, new_path, new_position):
+        if new_path == "/dev/null" or not new_path:
+            return  # Can't review a completely deleted file
 
-    def post_line_review(self, text, old_path, new_path, old_position, new_position):
-        if new_path == "/dev/null":
-            new_path = None
-        elif new_path:
-            new_path = new_path.lstrip("/")
+        new_path = new_path.lstrip("/")
 
-        if old_path == "/dev/null":
-            old_path = None
-        elif old_path:
-            old_path = old_path.lstrip("/")
+        # --- THE FIX: Let the coordinate resolver establish truth ---
+        old_path, old_position = self._resolve_diff_coordinates(new_path, new_position)
 
         # Ensure we aren't doubling up on discussions
         def get_pos(note):
@@ -253,18 +251,19 @@ class Gitlab(BaseBackend):
             return pos if pos is not None else {}
 
         if any(
-            get_pos(note).get("new_path") == new_path
-            and get_pos(note).get("new_line") == new_position
-            and note.get("author", {}).get("id") == self.current_user_id
-            for d in self.discussions
-            if d.get("notes")
-            for note in d["notes"]
+                get_pos(note).get("new_path") == new_path
+                and get_pos(note).get("new_line") == new_position
+                and note.get("author", {}).get("id") == self.current_user_id
+                for d in self.discussions
+                if d.get("notes")
+                for note in d["notes"]
         ):
             self.logger.info(
                 f"Already a discussion by the bot on path {new_path} and position {new_position}"
             )
             return
 
+        # Build position mapping payload safely
         position = {
             "new_path": new_path,
             "old_path": old_path,
@@ -276,8 +275,12 @@ class Gitlab(BaseBackend):
             "old_line": old_position,
         }
 
-        # Note: GitLab Draft Notes API uses 'note' instead of 'body'
-        payload = {"note": text, "position": position}
+        # Clean out any keys containing None (e.g., old_line on an added line)
+        position = {k: v for k, v in position.items() if v is not None}
+
+        payload = {"body": text, "position": position}
+        print(json.dumps(payload))
+
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         headers = {
             "PRIVATE-TOKEN": self.private_token,
@@ -285,7 +288,7 @@ class Gitlab(BaseBackend):
         }
         response = requests.post(url, headers=headers, json=payload)
         if not response.ok:
-            self.logger.error(f"Error posting inline discussion note to GitLab: {response}")
+            self.logger.error(f"Error posting inline discussion note to GitLab: {response.text}")
 
     def post_review(self, text):
         headers = {
@@ -358,4 +361,80 @@ class Gitlab(BaseBackend):
             else:
                 self.logger.info("Successfully posted new general MR note.")
 
+    def _resolve_diff_coordinates(self, target_new_path, target_new_line):
+        """
+        Parses self.diff_response to find the true historical old_path (handling renames)
+        and maps target_new_line to its corresponding old_line based on diff hunks.
+        """
+        if not self.diff_response:
+            return target_new_path, None
 
+        lines = self.diff_response.splitlines()
+        i = 0
+        num_lines = len(lines)
+
+        old_path = target_new_path
+        diff_hunk_lines = []
+        found_file = False
+
+        # Clean up target path matching
+        target_new_path = target_new_path.lstrip("/") if target_new_path else ""
+
+        # 1. Isolate the target file's diff block and extract the original path
+        while i < num_lines:
+            line = lines[i]
+            if line.startswith("+++ b/") and line[6:].lstrip("/") == target_new_path:
+                found_file = True
+                # Look at the immediate preceding line for the historical path
+                if i > 0 and lines[i - 1].startswith("--- a/"):
+                    extracted_old = lines[i - 1][6:].lstrip("/")
+                    if extracted_old != "dev/null":
+                        old_path = extracted_old
+
+                # Collect the diff patch lines for this specific file
+                i += 1
+                while i < num_lines and not lines[i].startswith("diff --git"):
+                    diff_hunk_lines.append(lines[i])
+                    i += 1
+                break
+            i += 1
+
+        if not found_file:
+            return old_path, None
+
+        # 2. Reconstruct line numbers by parsing unified diff hunks (@@)
+        old_line_counter = 0
+        new_line_counter = 0
+
+        for line in diff_hunk_lines:
+            if line.startswith('@@'):
+                try:
+                    # Extract starting coordinates: @@ -old_start,len +new_start,len @@
+                    parts = line.split(' ')
+                    old_start = int(parts[1].split(',')[0].replace('-', ''))
+                    new_start = int(parts[2].split(',')[0].replace('+', ''))
+                    old_line_counter = old_start
+                    new_line_counter = new_start
+                except (IndexError, ValueError):
+                    continue
+                continue
+
+            # Check if we reached the line flagged by your linter/bot
+            if new_line_counter == target_new_line:
+                if line.startswith('+'):
+                    # It's an added or modified line. GitLab requires old_line to be blank.
+                    return old_path, None
+                elif line.startswith(' '):
+                    # It's an unmodified context line. Return its matched historical line.
+                    return old_path, old_line_counter
+
+                    # Move line counters forward depending on the diff modification type
+            if line.startswith('+'):
+                new_line_counter += 1
+            elif line.startswith('-'):
+                old_line_counter += 1
+            elif line.startswith(' '):
+                old_line_counter += 1
+                new_line_counter += 1
+
+        return old_path, None

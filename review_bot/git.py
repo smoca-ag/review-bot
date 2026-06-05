@@ -30,5 +30,5 @@ class Git(BaseBackend):
     def description(self):
         return ""
 
-    def post_line_review(self, issue, old_path, new_path, old_position, new_position):
+    def post_line_review(self, issue, new_path, new_position):
         pass

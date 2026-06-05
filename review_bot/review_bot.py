@@ -786,7 +786,7 @@ async def async_review_process(
             f"{comment.file}:{comment.line} (Confidence {comment.confidence_score}): {text}"
         )
         if post:
-            mr_request.post_line_review(text, None, comment.file, None, comment.line)
+            mr_request.post_line_review(text, comment.file, comment.line)
     logger.info("Markdown Output Generated:\n" + markdown_comment)
 
     if post:

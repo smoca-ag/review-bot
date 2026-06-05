@@ -145,7 +145,7 @@ class BaseBackend:
     def publish_reviews(self):
         pass
 
-    def post_line_review(self, text, old_path, new_path, old_position, new_position):
+    def post_line_review(self, text, new_path, new_position):
         pass
 
     def post_review(self, text):
