@@ -70,22 +70,10 @@ class Gitlab(BaseBackend):
         self.current_user_id = self.get_current_user_id()
         self.versions = self.get_versions()
         self.discussions = self.get_discussion()
-        self.clear_existing_draft_notes()
         self.diff_response = self.get_merge_request_diff()
         self.mr = self.get_mr()
         self.fetch_repository()
 
-    def clear_existing_draft_notes(self):
-        draft_notes = self.get_draft_notes()
-        base_url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
-        headers = {"PRIVATE-TOKEN": self.private_token}
-        for note in draft_notes:
-            if note.get("author", {}).get("id") == self.current_user_id:
-                note_id = note.get("id")
-                del_url = f"{base_url}/{note_id}"
-                resp = requests.delete(del_url, headers=headers)
-                if not resp.ok:
-                    self.logger.error(f"Failed to delete stale draft note {note_id}")
 
     def get_current_user_id(self):
         user_url = f"{self.gitlab_url}/api/v4/user"
@@ -247,9 +235,6 @@ class Gitlab(BaseBackend):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         return self.get_paginated_response(url)
 
-    def get_draft_notes(self):
-        url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
-        return self.get_paginated_response(url)
 
     def post_line_review(self, text, old_path, new_path, old_position, new_position):
         if new_path == "/dev/null":
@@ -293,14 +278,14 @@ class Gitlab(BaseBackend):
 
         # Note: GitLab Draft Notes API uses 'note' instead of 'body'
         payload = {"note": text, "position": position}
-        url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
+        url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         headers = {
             "PRIVATE-TOKEN": self.private_token,
             "Content-Type": "application/json",
         }
         response = requests.post(url, headers=headers, json=payload)
         if not response.ok:
-            self.logger.error(f"Error posting inline draft note to GitLab: {response}")
+            self.logger.error(f"Error posting inline discussion note to GitLab: {response}")
 
     def post_review(self, text):
         headers = {
@@ -373,48 +358,4 @@ class Gitlab(BaseBackend):
             else:
                 self.logger.info("Successfully posted new general MR note.")
 
-    def publish_reviews(self):
-        """
-        Publishes all pending draft notes for this merge request in one pass.
-        """
-        url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes/bulk_publish"
-        headers = {
-            "PRIVATE-TOKEN": self.private_token,
-            "Content-Type": "application/json",
-        }
-        response = requests.post(url, headers=headers)
-        if not response.ok:
-            self.logger.error(
-                f"Error bulk-publishing draft notes to GitLab: {response.text}"
-            )
-            self.publish_individually()
-        else:
-            self.logger.info("Successfully published all draft notes.")
-        self.clear_existing_draft_notes()
 
-    def publish_individually(self):
-        """
-        Fetches all pending draft notes and publishes them one by one via PUT.
-        """
-        notes = self.get_draft_notes()
-        base_url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/draft_notes"
-        headers = {"PRIVATE-TOKEN": self.private_token}
-        # 2. Try publishing them one by one
-        for note in notes:
-            note_id = note.get("id")
-            pub_url = f"{base_url}/{note_id}/publish"
-
-            # Note: Publishing a single draft note requires a PUT request, not POST.
-            pub_resp = requests.put(pub_url, headers=headers)
-
-            if pub_resp.ok:
-                self.logger.info(f"Successfully published draft note {note_id}.")
-            else:
-                del_url = f"{base_url}/{note_id}"
-                requests.delete(del_url, headers=headers)
-                self.logger.error(
-                    f"FAILED to publish draft note {note_id}. Status: {pub_resp.status_code}"
-                )
-                self.logger.error(
-                    f"Problematic note position data: {note.get('position', 'No position data found')}"
-                )
