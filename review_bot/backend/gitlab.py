@@ -4,7 +4,7 @@ from urllib.parse import quote, urlparse
 
 import requests
 
-from review_bot.base_backend import BaseBackend
+from review_bot.backend.base_backend import BaseBackend
 
 
 def extract_gitlab_info(url):

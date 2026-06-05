@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 import argparse
 import logging
 
-from review_bot.git import Git
-from review_bot.gitlab import Gitlab
+from review_bot.backend.git import Git
+from review_bot.backend.gitlab import Gitlab
 from review_bot.diff import process_diff, paths_from_diff
 from review_bot.review_bot import review
 

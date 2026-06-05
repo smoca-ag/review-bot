@@ -3,7 +3,7 @@ import subprocess
 
 from opentelemetry import trace
 
-from review_bot.base_backend import BaseBackend
+from review_bot.backend.base_backend import BaseBackend
 
 tracer = trace.get_tracer(__name__)
 
