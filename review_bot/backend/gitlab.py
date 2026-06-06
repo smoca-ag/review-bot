@@ -1,9 +1,9 @@
+import base64
 import logging
 import os
 import shutil
 import subprocess
 import tempfile
-import base64
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urlparse
@@ -427,27 +427,17 @@ class Gitlab(BaseBackend):
 
         # 2. Get existing notes
         notes_url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/notes"
-        try:
-            notes_resp = requests.get(
-                notes_url,
-                headers={"PRIVATE-TOKEN": self.private_token},
-                params={"per_page": 100},
-                timeout=REQUEST_TIMEOUT,
-            )
-            notes_resp.raise_for_status()
-        except requests.RequestException as e:
-            self.logger.error(f"Error fetching notes: {e}")
-            return
 
         existing_notes = []
-        for note in notes_resp.json():
-            if (
-                not note.get("system")
-                and note.get("author", {}).get("id") == current_user_id
-            ):
-                # Filter out inline comments (DiffNote)
-                if note.get("type") != "DiffNote":
-                    existing_notes.append(note)
+        for discussion in self.discussions:
+            for note in discussion.get("notes", []):
+                if (
+                    not note.get("system")
+                    and note.get("author", {}).get("id") == current_user_id
+                ):
+                    # Filter out inline comments (DiffNote)
+                    if note.get("type") != "DiffNote":
+                        existing_notes.append(note)
 
         # 3. Update or post
         if existing_notes:
