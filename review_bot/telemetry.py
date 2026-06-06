@@ -1,6 +1,6 @@
 import os
 
-import dotenv
+from dotenv import load_dotenv
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
@@ -27,7 +27,7 @@ def setup_telemetry():
         return
     _telemetry_setup_done = True
 
-    dotenv.load_dotenv()
+    load_dotenv()
 
     resource = Resource(attributes={"service.name": "code-review-bot"})
     provider = TracerProvider(resource=resource)

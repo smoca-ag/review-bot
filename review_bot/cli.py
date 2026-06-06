@@ -1,4 +1,5 @@
 import argparse
+import asyncio  # 1. Added asyncio import
 import sys
 
 from dotenv import load_dotenv
@@ -6,7 +7,7 @@ from dotenv import load_dotenv
 from review_bot import BackendType, review
 
 
-def main():
+async def main():
     """CLI entry point for the review-bot command."""
     load_dotenv()
 
@@ -31,8 +32,8 @@ def main():
 
     args = parser.parse_args()
 
-    review(spec=args.spec, backend=args.backend, post=args.post)
+    await review(spec=args.spec, backend=args.backend, post=args.post)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(asyncio.run(main()))

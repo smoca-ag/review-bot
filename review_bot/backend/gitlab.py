@@ -200,7 +200,7 @@ class Gitlab(BaseBackend):
                 results.extend(data)
             else:
                 # If it's not a list, pagination might not apply in the expected way
-                return data
+                return [data]  # wrap in list to match return type
 
             url = response.links.get("next", {}).get("url")
         return results

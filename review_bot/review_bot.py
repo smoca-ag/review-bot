@@ -6,7 +6,7 @@ import sys
 from datetime import date
 
 import chromadb
-import dotenv
+from dotenv import load_dotenv
 from opentelemetry import trace
 from pydantic_ai import Agent, RunContext, Tool
 from pydantic_ai.capabilities import Thinking
@@ -38,7 +38,7 @@ def _get_model() -> str:
 
 
 def _ensure_setup() -> None:
-    dotenv.load_dotenv()
+    load_dotenv()
     setup_telemetry()
 
 
@@ -72,6 +72,9 @@ def inject_line_numbers(diff_text: str) -> str:
                 current_new_line = int(match.group(1))
             result.append(line)
         elif line.startswith("---") or line.startswith("+++"):
+            result.append(line)
+        elif line.startswith("\\"):
+            # "\\ No newline at end of file" – don't increment line counters
             result.append(line)
         elif line.startswith("+"):
             if current_new_line is not None:
@@ -379,13 +382,22 @@ SHARED_SUB_AGENT_SYSTEM_PROMPT = (
 )
 
 _agent_cache: dict = {}
+_agent_cache_key: tuple = ()  # (model, telemetry flag) used for invalidation
 
 
 def _get_agents() -> dict:
-    """Return the agent instances, creating them lazily on first access."""
-    if not _agent_cache:
+    """Return the agent instances, creating them lazily on first access.
+
+    The cache is invalidated when the resolved model configuration changes
+    (e.g. after a dotenv reload or environment-variable change).
+    """
+    global _agent_cache, _agent_cache_key
+
+    cache_key = (_resolve_model(), os.getenv("DISABLE_TELEMETRY", ""))
+    if not _agent_cache or _agent_cache_key != cache_key:
         _ensure_setup()
         model = _resolve_model()
+        _agent_cache_key = cache_key
 
         # All sub-agents share the identical system prompt configuration.
         # Personas are assigned in the user prompt to maximize KV cache hits.
@@ -565,7 +577,7 @@ def _format_and_post_review(logger, mr_request, review_result, post):
         logger.info("Review generated but not posted (--post not specified).")
 
 
-def review(spec: str, backend: str, post: bool = False) -> None:
+async def review(spec: str, backend: str, post: bool = False) -> None:
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span("review_process") as span:
         span.set_attribute("review.spec", spec)
@@ -589,7 +601,7 @@ def review(spec: str, backend: str, post: bool = False) -> None:
             if mr_request.repo_dir:
                 rag_span.set_attribute("rag.repo_dir", mr_request.repo_dir)
             try:
-                chroma_client = chromadb.Client()
+                chroma_client = chromadb.EphemeralClient()
                 collection = chroma_client.create_collection("codebase")
                 if mr_request.repo_dir:
                     indexed_count = _build_vector_index(mr_request.repo_dir, collection)
@@ -617,39 +629,20 @@ def review(spec: str, backend: str, post: bool = False) -> None:
             )
 
             try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
-            if loop is None:
-                asyncio.run(
-                    async_review_process(
-                        logger,
-                        mr_request,
-                        mr_description,
-                        secure_base_prompt,
-                        post,
-                        vector_index,
+                await async_review_process(
+                    logger,
+                    mr_request,
+                    mr_description,
+                    secure_base_prompt,
+                    post,
+                    vector_index,
+                )
+            except Exception as e:
+                logger.error(f"💥 CRITICAL: Flow failed. Error: {str(e)}")
+                if post:
+                    mr_request.post_review(
+                        "## 🤖 AI Review Error\n\nThe AI reviewer encountered a fatal structural parsing validation issue."
                     )
-                )
-            else:
-                loop.run_until_complete(
-                    async_review_process(
-                        logger,
-                        mr_request,
-                        mr_description,
-                        secure_base_prompt,
-                        post,
-                        vector_index,
-                    )
-                )
-        except Exception as e:
-            logger.error(f"💥 CRITICAL: Flow failed. Error: {str(e)}")
-            if post:
-                mr_request.post_review(
-                    "## 🤖 AI Review Error\n\nThe AI reviewer encountered a fatal structural parsing validation issue."
-                )
-            return
+                return
         finally:
-            chroma_client = None
             mr_request.cleanup()

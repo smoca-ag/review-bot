@@ -1,8 +1,10 @@
+import hmac
 import http.server
 import json
 import logging
 import multiprocessing
 import os
+import signal as signal_module
 import sys
 import threading
 
@@ -16,14 +18,29 @@ from review_bot import review
 logger = logging.getLogger(__name__)
 
 # --- Configuration (from Environment Variables) ---
-# Telemetry is initialized in main() to avoid issues with multiprocessing
-HOST = os.environ.get("WEBHOOK_HOST", "0.0.0.0")
-PORT = int(os.environ.get("WEBHOOK_PORT", "8080"))
-GITLAB_WEBHOOK_LABEL = os.environ.get("GITLAB_WEBHOOK_LABEL", "ai-review-requested")
-GITLAB_WEBHOOK_REVIEW_ALL = (
-    os.environ.get("GITLAB_WEBHOOK_REVIEW_ALL", "false").lower() == "true"
-)
-GITLAB_WEBHOOK_TOKEN = os.environ.get("GITLAB_WEBHOOK_TOKEN")
+# Read lazily in main() to allow env changes between runs / in tests.
+HOST = None
+PORT = None
+GITLAB_WEBHOOK_LABEL = None
+GITLAB_WEBHOOK_REVIEW_ALL = None
+GITLAB_WEBHOOK_TOKEN = None
+
+
+def _load_config():
+    """Populate module-level config from environment variables."""
+    global \
+        HOST, \
+        PORT, \
+        GITLAB_WEBHOOK_LABEL, \
+        GITLAB_WEBHOOK_REVIEW_ALL, \
+        GITLAB_WEBHOOK_TOKEN
+    HOST = os.environ.get("WEBHOOK_HOST", "0.0.0.0")
+    PORT = int(os.environ.get("WEBHOOK_PORT", "8080"))
+    GITLAB_WEBHOOK_LABEL = os.environ.get("GITLAB_WEBHOOK_LABEL", "ai-review-requested")
+    GITLAB_WEBHOOK_REVIEW_ALL = (
+        os.environ.get("GITLAB_WEBHOOK_REVIEW_ALL", "false").lower() == "true"
+    )
+    GITLAB_WEBHOOK_TOKEN = os.environ.get("GITLAB_WEBHOOK_TOKEN")
 
 
 # --- The function to run in a separate process ---
@@ -64,7 +81,13 @@ class ReviewManager:
                 # Cancel the currently running process
                 logger.info(f"Canceling currently running review for MR !{mr_id}")
                 if self.active_process and self.active_process.is_alive():
-                    self.active_process.terminate()
+                    try:
+                        os.kill(self.active_process.pid, signal_module.SIGTERM)
+                        self.active_process.join(timeout=5)
+                    except (ProcessLookupError, OSError):
+                        pass
+                    if self.active_process.is_alive():
+                        self.active_process.terminate()
                 self.active_process = None
                 self.active_mr_id = None
 
@@ -124,7 +147,9 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
         """Validates the 'X-Gitlab-Token' header against our secret."""
         received_token = self.headers.get("X-Gitlab-Token")
 
-        if received_token == GITLAB_WEBHOOK_TOKEN:
+        if received_token and hmac.compare_digest(
+            received_token, GITLAB_WEBHOOK_TOKEN or ""
+        ):
             return True
         else:
             client_ip = self.client_address[0]
@@ -312,6 +337,8 @@ def main():
         multiprocessing.set_start_method("spawn", force=True)
     except RuntimeError:
         pass
+
+    _load_config()
 
     # --- Logging Configuration ---
     # Configure logging here so it's only active when main() is called

@@ -90,9 +90,10 @@ class BaseBackend:
                     file_path,
                 ],
                 capture_output=True,
+                text=True,
                 timeout=30,
             )
-            return output.stdout.decode("utf-8", errors="replace")
+            return output.stdout
         except subprocess.TimeoutExpired:
             return "Error: Command timed out after 30 seconds."
         except subprocess.CalledProcessError as e:
