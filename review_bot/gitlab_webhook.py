@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import http.server
 import json
@@ -54,7 +55,7 @@ def start_ai_review(mr_id, mr_url):
     try:
         logger.info(f"Processing URL: {mr_url}")
         # Simulate a long-running task (e.g., API calls, code analysis)
-        review(mr_url, backend="gitlab", post=True)
+        asyncio.run(review(mr_url, backend="gitlab", post=True))
         logger.info(f"Finished URL: {mr_url}")
     except Exception as e:
         logger.error(f"ERROR during AI review for MR !{mr_url}: {e}", exc_info=True)
