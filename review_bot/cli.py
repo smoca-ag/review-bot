@@ -3,7 +3,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from review_bot import BackendType, backend_factory, review
+from review_bot import BackendType, review
 
 
 def main():

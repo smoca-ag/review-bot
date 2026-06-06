@@ -8,7 +8,7 @@ import threading
 
 from opentelemetry import trace
 
-from review_bot import BackendType, review
+from review_bot import review
 
 # --- Logger Setup ---
 # Get a logger for this module.
