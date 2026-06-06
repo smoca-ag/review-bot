@@ -109,7 +109,7 @@ class Gitlab(BaseBackend):
         self.current_user_id: Optional[int] = None
         self.versions: List[Dict[str, Any]] = []
         self.discussions: List[Dict[str, Any]] = []
-        self.diff_response: Optional[str] = None
+        self.diff_response: str
         self.mr: Optional[Dict[str, Any]] = None
 
     def load(self):
@@ -121,9 +121,10 @@ class Gitlab(BaseBackend):
 
         self.discussions = self.get_discussion() or []
 
-        self.diff_response = self.get_merge_request_diff()
-        if self.diff_response is None:
+        diff_response = self.get_merge_request_diff()
+        if diff_response is None:
             raise RuntimeError("Failed to fetch MR diff. Cannot proceed.")
+        self.diff_response = diff_response
 
         self.mr = self.get_mr()
         if self.mr is None:

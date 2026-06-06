@@ -810,7 +810,7 @@ async def async_review_process(
         logger.info("Review generated but not posted (--post not specified).")
 
 
-def review(spec: str, backend: str | None = None, post: bool = False) -> None:
+def review(spec: str, backend: review_bot.BackendType, post: bool = False) -> None:
     """Synchronous entry point for the CLI / application.
 
     Args:
@@ -821,7 +821,7 @@ def review(spec: str, backend: str | None = None, post: bool = False) -> None:
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span("review_process") as span:
         span.set_attribute("review.spec", spec)
-        span.set_attribute("review.backend", backend)
+        span.set_attribute("review.backend", str(backend))
         span.set_attribute("review.post", post)
 
         mr_request = review_bot.backend_factory(backend)(logger, spec)
@@ -870,11 +870,12 @@ def review(spec: str, backend: str | None = None, post: bool = False) -> None:
         try:
             diff_content = mr_request.diff() or ""
             mr_description = mr_request.description() or "No description provided."
+            title = mr_request.title() or "No title provided."
 
             secure_prompt = (
                 f"Review the following Merge Request details:\n\n"
                 f"### DATE:\n{date.today().isoformat()}\n\n"
-                f"### MR TITLE:\n<title>\n{wrap_in_cdata(mr_request.title())}\n</title>\n\n"
+                f"### MR TITLE:\n<title>\n{wrap_in_cdata(title)}\n</title>\n\n"
                 f"### MR DESCRIPTION:\n<description>\n{wrap_in_cdata(mr_description)}\n</description>\n\n"
                 f"### CODE DIFF:\n<untrusted_diff>\n{wrap_in_cdata(inject_line_numbers(diff_content))}\n</untrusted_diff>"
             )

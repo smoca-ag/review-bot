@@ -169,6 +169,15 @@ class BaseBackend:
     def publish_reviews(self):
         pass
 
+    def diff(self) -> str:
+        return ""
+
+    def description(self) -> str | None:
+        return None
+
+    def title(self) -> str | None:
+        return None
+
     def post_line_review(self, text, new_path, new_position):
         pass
 
