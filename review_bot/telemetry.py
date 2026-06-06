@@ -15,6 +15,13 @@ _telemetry_setup_done = False
 
 
 def setup_telemetry():
+    """Initialise OpenTelemetry tracing (idempotent).
+
+    Telemetry is disabled entirely when ``DISABLE_TELEMETRY=true``.
+    When an OTLP endpoint is configured via ``OTEL_EXPORTER_OTLP_ENDPOINT``,
+    traces are exported to that collector; otherwise they fall back to
+    console output for local debugging.
+    """
     global _telemetry_setup_done
     if _telemetry_setup_done:
         return
@@ -50,4 +57,5 @@ def setup_telemetry():
 
     trace.set_tracer_provider(provider)
 
+    # Instrument pydantic_ai agents – safe to call multiple times (no-op after first).
     Agent.instrument_all()

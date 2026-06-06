@@ -37,7 +37,7 @@ def start_ai_review(mr_id, mr_url):
     try:
         logger.info(f"Processing URL: {mr_url}")
         # Simulate a long-running task (e.g., API calls, code analysis)
-        review(mr_url, BackendType.GITLAB, post=True)
+        review(mr_url, backend="gitlab", post=True)
         logger.info(f"Finished URL: {mr_url}")
     except Exception as e:
         logger.error(f"ERROR during AI review for MR !{mr_url}: {e}", exc_info=True)
@@ -337,7 +337,18 @@ def main():
     review_manager = ReviewManager()
 
     httpd = None  # Initialize to None for the finally block
+    shutdown_event = threading.Event()
+
+    def _shutdown_handler(signum, frame):
+        logger.info(f"Received signal {signum}. Shutting down...")
+        shutdown_event.set()
+
     try:
+        import signal
+
+        signal.signal(signal.SIGINT, _shutdown_handler)
+        signal.signal(signal.SIGTERM, _shutdown_handler)
+
         server_address = (HOST, PORT)
         # Use ThreadingHTTPServer to handle multiple concurrent requests
         httpd = http.server.ThreadingHTTPServer(server_address, GitLabWebhookHandler)
@@ -348,7 +359,9 @@ def main():
         logger.info("Token: Set (hidden for security)")
         logger.info("Press Ctrl+C to shut down.")
 
-        httpd.serve_forever()
+        # Serve until shutdown signal is received
+        while not shutdown_event.wait(timeout=1):
+            httpd.handle_request()
 
     except KeyboardInterrupt:
         logger.info("Shutting down server...")

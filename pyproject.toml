@@ -1,7 +1,7 @@
 [project]
 name = "review_bot"
 description = "A simple AI code review bot using local LLMs"
-version = "0.1"
+version = "0.1.0"
 readme = "Readme.md"
 license = "MIT"
 license-files = ["LICENSE"]

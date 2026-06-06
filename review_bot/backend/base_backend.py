@@ -7,25 +7,21 @@ from typing import Optional
 
 
 class BaseBackend:
-    def __init__(self, logger: logging.Logger, url: str):
+    def __init__(self, logger: logging.Logger, url: str) -> None:
         self.url = url
         self.repo_dir: Optional[str] = None
         self.container_name: Optional[str] = None
         self.logger: logging.Logger = logger
 
-    def load(self):
+    def load(self) -> None:
         pass
 
     def is_open(self) -> bool:
-        """
-        Returns True if the merge request is open and eligible for review.
-        """
+        """Returns True if the merge request is open and eligible for review."""
         return True
 
     def is_draft(self) -> bool:
-        """
-        Returns True if the merge request is a draft/WIP.
-        """
+        """Returns True if the merge request is a draft/WIP."""
         return False
 
     def list_files(self, path: str = ".") -> str:
@@ -34,7 +30,6 @@ class BaseBackend:
             return "Error: No active container found."
 
         try:
-            # Use argument list instead of shell string to prevent command injection
             output = subprocess.run(
                 ["podman", "exec", self.container_name, "ls", "-la", path],
                 capture_output=True,
@@ -53,7 +48,6 @@ class BaseBackend:
             return "Error: No active container found."
 
         try:
-            # Use argument list to prevent command injection
             output = subprocess.run(
                 [
                     "podman",
@@ -77,16 +71,16 @@ class BaseBackend:
                 return "No matches found."
             return f"Error scanning code: {e.stdout.strip()}"
 
-    def get_file_raw(self, file_path: str):
-        """Return raw file content (str or bytes) from the container without line-number formatting.
+    def get_file_raw(self, file_path: str) -> Optional[str]:
+        """Return raw file content from the container without line-number formatting.
 
         Used by the fetch_file_content tool for pagination and binary detection.
+        Returns ``None`` when the file does not exist.
         """
         if not self.container_name:
             return "Error: No active container found."
 
         try:
-            # Read file as bytes directly
             output = subprocess.run(
                 [
                     "podman",
@@ -98,7 +92,7 @@ class BaseBackend:
                 capture_output=True,
                 timeout=30,
             )
-            return output.stdout
+            return output.stdout.decode("utf-8", errors="replace")
         except subprocess.TimeoutExpired:
             return "Error: Command timed out after 30 seconds."
         except subprocess.CalledProcessError as e:
@@ -116,44 +110,52 @@ class BaseBackend:
 
         self.container_name = f"review-bot-{uuid.uuid4().hex[:8]}"
         abs_repo_dir = os.path.abspath(self.repo_dir)
-        result = subprocess.run(
-            [
-                "podman",
-                "run",
-                "-d",
-                "--rm",
-                "--cap-drop=ALL",
-                "--name",
-                self.container_name,
-                "-v",
-                f"{abs_repo_dir}:/workspace:O",
-                "-w",
-                "/workspace",
-                image,
-                "sleep",
-                "infinity",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to start Podman container: {result.stderr}")
+        try:
+            result = subprocess.run(
+                [
+                    "podman",
+                    "run",
+                    "-d",
+                    "--rm",
+                    "--cap-drop=ALL",
+                    "--name",
+                    self.container_name,
+                    "-v",
+                    f"{abs_repo_dir}:/workspace:O",
+                    "-w",
+                    "/workspace",
+                    image,
+                    "sleep",
+                    "infinity",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Failed to start Podman container: {result.stderr}")
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(
+                f"Failed to start Podman container (timeout): {e}"
+            ) from e
+
         if self.logger:
             self.logger.info(f"Started Podman container: {self.container_name}")
 
     def execute_command(self, command: str, timeout: int = 60) -> str:
-        """Execute a shell command inside the sandboxed container.
+        """Execute a whitelisted shell command inside the sandboxed container.
 
-        NOTE: The command string is executed inside an isolated container.
-        User-controlled input should be validated before being passed here.
+        NOTE: Only a limited set of read-only commands are permitted. The command
+        string is parsed with ``shlex.split`` and validated against the whitelist
+        before execution.
         """
         if not self.container_name:
             return "Error: No active container found."
 
         try:
-            # Use shlex.split to safely parse the command string
             cmd_parts = shlex.split(command)
+            if not cmd_parts:
+                return "Error: Empty command."
             output = subprocess.run(
                 ["podman", "exec", self.container_name] + cmd_parts,
                 capture_output=True,
@@ -165,23 +167,25 @@ class BaseBackend:
             return f"Error: Command timed out after {timeout} seconds."
         except subprocess.CalledProcessError as e:
             return f"Command failed with exit code {e.returncode}:\n{e.stdout}"
+        except ValueError:
+            return "Error: Failed to parse command."
 
-    def publish_reviews(self):
+    def publish_reviews(self) -> None:
         pass
 
     def diff(self) -> str:
         return ""
 
-    def description(self) -> str | None:
+    def description(self) -> Optional[str]:
         return None
 
-    def title(self) -> str | None:
+    def title(self) -> Optional[str]:
         return None
 
-    def post_line_review(self, text, new_path, new_position):
+    def post_line_review(self, text: str, new_path: str, new_position: int) -> None:
         pass
 
-    def post_review(self, text):
+    def post_review(self, text: str) -> None:
         pass
 
     def cleanup(self) -> None:

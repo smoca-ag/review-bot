@@ -30,19 +30,38 @@ if not logger.handlers:
 # ==========================================
 # 1. Telemetry & Environment Setup
 # ==========================================
-dotenv.load_dotenv()
-setup_telemetry()
+# NOTE: Telemetry is initialized lazily in _ensure_setup() to avoid side effects on import.
 
-openai_url = os.getenv("OPENAI_URL", "http://localhost:11434/v1")
-openai_api_key = os.getenv("OPENAI_API_KEY", "unused")
-model_name = os.getenv("ANTHROPIC_DEFAULT_OPUS_MODEL") or os.getenv(
-    "OPENAI_MODEL", "qwen3-coder:30b"
-)
 
-if os.getenv("ANTHROPIC_DEFAULT_OPUS_MODEL"):
-    model = f"anthropic:{model_name}"
-else:
-    model = f"openai:{model_name}"
+def _get_model() -> str:
+    """Resolve the model string from environment variables.
+
+    Returns a model identifier compatible with pydantic_ai, e.g. "openai:gpt-4" or
+    "anthropic:claude-3-5-sonnet-latest".
+    """
+    model_name = os.getenv("ANTHROPIC_DEFAULT_OPUS_MODEL") or os.getenv(
+        "OPENAI_MODEL", "qwen3-coder:30b"
+    )
+    if os.getenv("ANTHROPIC_DEFAULT_OPUS_MODEL"):
+        return f"anthropic:{model_name}"
+    return f"openai:{model_name}"
+
+
+def _ensure_setup() -> None:
+    """Ensure dotenv and telemetry are initialised (idempotent)."""
+    dotenv.load_dotenv()
+    setup_telemetry()
+
+
+# Lazy model reference – resolved when the agents are first constructed.
+_model: str | None = None
+
+
+def _resolve_model() -> str:
+    global _model
+    if _model is None:
+        _model = _get_model()
+    return _model
 
 
 # ==========================================
@@ -519,85 +538,130 @@ CRITIC_SHIELD = (
     "3. STRUCTURE: Provide your analysis by cleanly populating the required schema fields directly. Do not stringify or wrap your arrays in markdown block strings.\n"
 )
 
-agent_kwargs = {
-    "model": model,
-    "deps_type": ReviewDeps,
-    "tools": shared_tools,
-    "retries": 3,
-    "capabilities": [Thinking(effort="high")],
-    "model_settings": {"timeout": 1800},
-}
+# NOTE: Agents are constructed lazily to avoid side effects on import.
+_agent_cache: dict = {}
 
-security_agent = Agent(
-    **agent_kwargs,
-    output_type=SecurityReport,
-    system_prompt=(
-        "You are an elite Application Security Engineer. Your ONLY job is to find security vulnerabilities "
-        "(e.g., XSS, SQLi, Auth bypass, Secrets in code) in the provided diff.\n"
-        "- IGNORE logic bugs, styling, architecture, tests, or PR descriptions.\n"
-        "- Use tools to verify if a variable is sanitized elsewhere before calling it a vulnerability.\n"
-        "- If the code is secure, return an empty findings list." + SUB_AGENT_SHIELD
-    ),
-)
 
-logic_agent = Agent(
-    **agent_kwargs,
-    output_type=LogicReport,
-    system_prompt=(
-        "You are a Principal Software Engineer. Your ONLY job is to find strict logic bugs, type errors, "
-        "and unhandled exceptions in the diff.\n"
-        "- IGNORE styling, formatting, variable naming, architecture, tests, and PR descriptions.\n"
-        "- DO NOT assume missing context is a bug. Use tools to verify missing imports/variables.\n"
-        "- If you cannot prove it is a bug, DO NOT report it." + SUB_AGENT_SHIELD
-    ),
-)
-
-architecture_agent = Agent(
-    **agent_kwargs,
-    output_type=ArchitectureReport,
-    system_prompt=(
-        "You are a Staff Software Architect. Your ONLY job is to review the code's high-level design and structure.\n"
-        "- Look for violations of SOLID principles, DRY, or tight coupling.\n"
-        "- IGNORE micro-level logic bugs, styling, security vulnerabilities, or PR descriptions.\n"
-        "- DO NOT provide line-by-line comments. Provide general, high-level feedback.\n"
-        + SUB_AGENT_SHIELD
-    ),
-)
-
-test_agent = Agent(
-    **agent_kwargs,
-    output_type=TestReport,
-    system_prompt=(
-        "You are a QA and Test Automation Engineer. Your ONLY job is to evaluate test coverage and edge cases.\n"
-        "- Identify edge cases, boundary conditions, and race conditions that the current code/tests miss.\n"
-        "- Review existing tests in the diff to ensure they actually assert meaningful outcomes (no 'happy path only' tests).\n"
-        "- If the project has no tests at all, return an empty findings list.\n"
-        "- IGNORE general logic bugs outside of testing, architecture, styling, and security.\n"
-        + SUB_AGENT_SHIELD
-    ),
-)
-
-performance_agent = Agent(
-    **agent_kwargs,
-    output_type=PerformanceReport,
-    system_prompt=(
-        "You are a Performance & Scalability Engineer. Your ONLY job is to identify system-crashing scale issues.\n"
-        "- Hunt for N+1 database queries, missing indexes, memory leaks, and inefficient Big-O complexity.\n"
-        "- Think about what happens when this code processes 10 million records, not 10 records.\n"
-        + SUB_AGENT_SHIELD
-    ),
-)
-
-context_agent = Agent(
-    **agent_kwargs,
-    output_type=ContextReport,
-    system_prompt=(
-        "You are a strict Technical Lead. Your ONLY job is to evaluate the PR Description.\n"
-        "- Does it explain WHAT the change is and HOW it was tested (Test Plan)?\n"
-        "- IGNORE the code diff completely, except to check if major changes lack description context."
-        + SUB_AGENT_SHIELD
-    ),
-)
+def _get_agents() -> dict:
+    """Return the agent instances, creating them lazily on first access."""
+    if not _agent_cache:
+        _ensure_setup()
+        model = _resolve_model()
+        _agent_cache["security_agent"] = Agent(
+            model=model,
+            deps_type=ReviewDeps,
+            tools=shared_tools,
+            retries=3,
+            capabilities=[Thinking(effort="high")],
+            model_settings={"timeout": 1800},
+            output_type=SecurityReport,
+            system_prompt=(
+                "You are an elite Application Security Engineer. Your ONLY job is to find security vulnerabilities "
+                "(e.g., XSS, SQLi, Auth bypass, Secrets in code) in the provided diff.\n"
+                "- IGNORE logic bugs, styling, architecture, tests, or PR descriptions.\n"
+                "- Use tools to verify if a variable is sanitized elsewhere before calling it a vulnerability.\n"
+                "- If the code is secure, return an empty findings list."
+                + SUB_AGENT_SHIELD
+            ),
+        )
+        _agent_cache["logic_agent"] = Agent(
+            model=model,
+            deps_type=ReviewDeps,
+            tools=shared_tools,
+            retries=3,
+            capabilities=[Thinking(effort="high")],
+            model_settings={"timeout": 1800},
+            output_type=LogicReport,
+            system_prompt=(
+                "You are a Principal Software Engineer. Your ONLY job is to find strict logic bugs, type errors, "
+                "and unhandled exceptions in the diff.\n"
+                "- IGNORE styling, formatting, variable naming, architecture, tests, and PR descriptions.\n"
+                "- DO NOT assume missing context is a bug. Use tools to verify missing imports/variables.\n"
+                "- If you cannot prove it is a bug, DO NOT report it."
+                + SUB_AGENT_SHIELD
+            ),
+        )
+        _agent_cache["architecture_agent"] = Agent(
+            model=model,
+            deps_type=ReviewDeps,
+            tools=shared_tools,
+            retries=3,
+            capabilities=[Thinking(effort="high")],
+            model_settings={"timeout": 1800},
+            output_type=ArchitectureReport,
+            system_prompt=(
+                "You are a Staff Software Architect. Your ONLY job is to review the code's high-level design and structure.\n"
+                "- Look for violations of SOLID principles, DRY, or tight coupling.\n"
+                "- IGNORE micro-level logic bugs, styling, security vulnerabilities, or PR descriptions.\n"
+                "- DO NOT provide line-by-line comments. Provide general, high-level feedback.\n"
+                + SUB_AGENT_SHIELD
+            ),
+        )
+        _agent_cache["test_agent"] = Agent(
+            model=model,
+            deps_type=ReviewDeps,
+            tools=shared_tools,
+            retries=3,
+            capabilities=[Thinking(effort="high")],
+            model_settings={"timeout": 1800},
+            output_type=TestReport,
+            system_prompt=(
+                "You are a QA and Test Automation Engineer. Your ONLY job is to evaluate test coverage and edge cases.\n"
+                "- Identify edge cases, boundary conditions, and race conditions that the current code/tests miss.\n"
+                "- Review existing tests in the diff to ensure they actually assert meaningful outcomes (no 'happy path only' tests).\n"
+                "- If the project has no tests at all, return an empty findings list.\n"
+                "- IGNORE general logic bugs outside of testing, architecture, styling, and security.\n"
+                + SUB_AGENT_SHIELD
+            ),
+        )
+        _agent_cache["performance_agent"] = Agent(
+            model=model,
+            deps_type=ReviewDeps,
+            tools=shared_tools,
+            retries=3,
+            capabilities=[Thinking(effort="high")],
+            model_settings={"timeout": 1800},
+            output_type=PerformanceReport,
+            system_prompt=(
+                "You are a Performance & Scalability Engineer. Your ONLY job is to identify system-crashing scale issues.\n"
+                "- Hunt for N+1 database queries, missing indexes, memory leaks, and inefficient Big-O complexity.\n"
+                "- Think about what happens when this code processes 10 million records, not 10 records.\n"
+                + SUB_AGENT_SHIELD
+            ),
+        )
+        _agent_cache["context_agent"] = Agent(
+            model=model,
+            deps_type=ReviewDeps,
+            tools=shared_tools,
+            retries=3,
+            capabilities=[Thinking(effort="high")],
+            model_settings={"timeout": 1800},
+            output_type=ContextReport,
+            system_prompt=(
+                "You are a strict Technical Lead. Your ONLY job is to evaluate the PR Description.\n"
+                "- Does it explain WHAT the change is and HOW it was tested (Test Plan)?\n"
+                "- IGNORE the code diff completely, except to check if major changes lack description context."
+                + SUB_AGENT_SHIELD
+            ),
+        )
+        _agent_cache["critic_agent"] = Agent(
+            model,
+            deps_type=CriticDeps,
+            output_type=FinalReviewResult,
+            model_settings={"timeout": 1800},
+            system_prompt=(
+                "You are the Final Review Consolidator and Gatekeeper. You will receive reports from Security, "
+                "Logic, Context, Architecture, Testing, and Performance agents.\n\n"
+                "YOUR JOB:\n"
+                "1. Consolidate all reports into a unified review. Remove duplicates.\n"
+                "2. RUTHLESSLY FILTER FALSE POSITIVES. Look at the `confidence_score` and `false_positive_reasoning` of every LineComment.\n"
+                "3. If a comment has a confidence score < 0.8, or if the `false_positive_reasoning` reveals it's likely a hallucination, DROP IT entirely.\n"
+                "4. Summarize the remaining valid findings into the final schema.\n"
+                "Do not invent new issues; only filter and consolidate the provided reports."
+                + CRITIC_SHIELD
+            ),
+        )
+    return _agent_cache
 
 
 @dataclass
@@ -608,25 +672,6 @@ class CriticDeps(ReviewDeps):
     architecture_report: ArchitectureReport
     test_report: TestReport
     performance_report: PerformanceReport
-
-
-critic_agent = Agent(
-    model,
-    deps_type=CriticDeps,
-    output_type=FinalReviewResult,
-    model_settings={"timeout": 1800},
-    system_prompt=(
-        "You are the Final Review Consolidator and Gatekeeper. You will receive reports from Security, "
-        "Logic, Context, Architecture, Testing, and Performance agents.\n\n"
-        "YOUR JOB:\n"
-        "1. Consolidate all reports into a unified review. Remove duplicates.\n"
-        "2. RUTHLESSLY FILTER FALSE POSITIVES. Look at the `confidence_score` and `false_positive_reasoning` of every LineComment.\n"
-        "3. If a comment has a confidence score < 0.8, or if the `false_positive_reasoning` reveals it's likely a hallucination, DROP IT entirely.\n"
-        "4. Summarize the remaining valid findings into the final schema.\n"
-        "Do not invent new issues; only filter and consolidate the provided reports."
-        + CRITIC_SHIELD
-    ),
-)
 
 
 # ==========================================
@@ -649,6 +694,15 @@ async def async_review_process(
             mr_description=mr_description,
             vector_index=vector_index,
         )
+
+        agents = _get_agents()
+        security_agent = agents["security_agent"]
+        logic_agent = agents["logic_agent"]
+        architecture_agent = agents["architecture_agent"]
+        test_agent = agents["test_agent"]
+        performance_agent = agents["performance_agent"]
+        context_agent = agents["context_agent"]
+        critic_agent = agents["critic_agent"]
 
         logger.info(
             "🚀 Launching 6 specialized agents concurrently (Security, Logic, Architecture, Context, QA, Performance)..."
@@ -720,11 +774,12 @@ async def async_review_process(
             len(review_result.critical_line_comments),
         )
 
-        # Format and log the final output
-        markdown_comment = (
-            f"## 🤖 AI Code Review Summary\n\n{review_result.summary}\n\n"
-        )
-    # --- Formatting & Posting ---
+        # Format and post the review
+        _format_and_post_review(logger, mr_request, review_result, post)
+
+
+def _format_and_post_review(logger, mr_request, review_result, post):
+    """Format the review result and post to the MR if requested."""
     status_icon = "✅" if review_result.recommend_approval else "❌"
     header_identifier = "# 🤖 AI Review"
 
@@ -810,7 +865,7 @@ async def async_review_process(
         logger.info("Review generated but not posted (--post not specified).")
 
 
-def review(spec: str, backend: review_bot.BackendType, post: bool = False) -> None:
+def review(spec: str, backend: str, post: bool = False) -> None:
     """Synchronous entry point for the CLI / application.
 
     Args:

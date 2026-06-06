@@ -63,23 +63,23 @@ def extract_gitlab_info(url: str) -> GitLabInfo:
     project_path = "/".join(project_parts)
 
     # Extract merge request id
-    mr_id = None
+    mr_id_str: Optional[str] = None
     for i in range(len(path_parts)):
         if path_parts[i] == "merge_requests" and i + 1 < len(path_parts):
-            mr_id = path_parts[i + 1]
+            mr_id_str = path_parts[i + 1]
             break
 
-    if mr_id is None:
+    if mr_id_str is None:
         raise ValueError(
             f"Could not extract merge request ID from URL: {url}. "
             f"Expected URL format: https://gitlab.example.com/group/project/-/merge_requests/19"
         )
 
     try:
-        mr_id = int(mr_id)
+        mr_id = int(mr_id_str)
     except (ValueError, TypeError):
         raise ValueError(
-            f"Invalid merge request ID '{mr_id}' in URL: {url}. Expected a numeric ID."
+            f"Invalid merge request ID '{mr_id_str}' in URL: {url}. Expected a numeric ID."
         )
 
     return GitLabInfo(
@@ -134,15 +134,17 @@ class Gitlab(BaseBackend):
 
     def get_current_user_id(self) -> Optional[int]:
         user_url = f"{self.gitlab_url}/api/v4/user"
-        user_resp = requests.get(
-            user_url,
-            headers={"PRIVATE-TOKEN": self.private_token},
-            timeout=REQUEST_TIMEOUT,
-        )
-        if user_resp.ok:
+        try:
+            user_resp = requests.get(
+                user_url,
+                headers={"PRIVATE-TOKEN": self.private_token},
+                timeout=REQUEST_TIMEOUT,
+            )
+            user_resp.raise_for_status()
             return user_resp.json().get("id")
-        self.logger.error("Could not fetch current user info")
-        return None
+        except requests.RequestException as e:
+            self.logger.error(f"Could not fetch current user info: {e}")
+            return None
 
     def is_open(self) -> bool:
         if not self.mr:
@@ -174,21 +176,23 @@ class Gitlab(BaseBackend):
 
     def get_json_response(self, url: str) -> Optional[Dict[str, Any]]:
         headers = {"PRIVATE-TOKEN": self.private_token}
-        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-        if not response.ok:
-            self.logger.error(f"Error fetching {url}: status {response.status_code}")
+        try:
+            response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            self.logger.error(f"Error fetching {url}: {e}")
             return None
-        return response.json()
 
     def get_paginated_response(self, url: str) -> List[Dict[str, Any]]:
         headers = {"PRIVATE-TOKEN": self.private_token}
         results: List[Dict[str, Any]] = []
         while url:
-            response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-            if not response.ok:
-                self.logger.error(
-                    f"Error fetching {url}: status {response.status_code}"
-                )
+            try:
+                response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+                response.raise_for_status()
+            except requests.RequestException as e:
+                self.logger.error(f"Error fetching {url}: {e}")
                 break
 
             data = response.json()
@@ -203,11 +207,13 @@ class Gitlab(BaseBackend):
 
     def get_text_response(self, url: str) -> Optional[str]:
         headers = {"PRIVATE-TOKEN": self.private_token}
-        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-        if not response.ok:
-            self.logger.error(f"Error fetching {url}: status {response.status_code}")
+        try:
+            response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            return response.text
+        except requests.RequestException as e:
+            self.logger.error(f"Error fetching {url}: {e}")
             return None
-        return response.text
 
     def get_merge_request_diff(self) -> Optional[str]:
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/raw_diffs"
@@ -242,38 +248,71 @@ class Gitlab(BaseBackend):
             span.set_attribute("gitlab.merge_request_iid", self.merge_request_iid)
             span.set_attribute("gitlab.repo_dir", repo_dir)
 
-            subprocess.check_call(["git", "init", repo_dir])
-            subprocess.check_call(
-                ["git", "remote", "add", "origin", clone_url], cwd=repo_dir
-            )
+            try:
+                subprocess.run(
+                    ["git", "init", repo_dir],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                subprocess.run(
+                    ["git", "remote", "add", "origin", clone_url],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    cwd=repo_dir,
+                )
 
-            subprocess.check_call(
-                [
-                    "git",
-                    "fetch",
-                    "--depth",
-                    "1",
-                    "origin",
-                    f"refs/merge-requests/{self.merge_request_iid}/head:mr-head",
-                ],
-                cwd=repo_dir,
-            )
-
-            target_branch = self.mr.get("target_branch") if self.mr else None
-            if target_branch:
-                subprocess.check_call(
+                subprocess.run(
                     [
                         "git",
                         "fetch",
                         "--depth",
                         "1",
                         "origin",
-                        f"refs/heads/{target_branch}:target-branch",
+                        f"refs/merge-requests/{self.merge_request_iid}/head:mr-head",
                     ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
                     cwd=repo_dir,
                 )
 
-            subprocess.check_call(["git", "checkout", "mr-head"], cwd=repo_dir)
+                target_branch = self.mr.get("target_branch") if self.mr else None
+                if target_branch:
+                    subprocess.run(
+                        [
+                            "git",
+                            "fetch",
+                            "--depth",
+                            "1",
+                            "origin",
+                            f"refs/heads/{target_branch}:target-branch",
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                        cwd=repo_dir,
+                    )
+
+                subprocess.run(
+                    ["git", "checkout", "mr-head"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    cwd=repo_dir,
+                )
+            except subprocess.TimeoutExpired as e:
+                self.logger.error(f"Git operation timed out: {e}")
+                raise RuntimeError(f"Git operation timed out: {e}") from e
+            except subprocess.CalledProcessError as e:
+                self.logger.error(f"Git operation failed: {e.stderr}")
+                raise RuntimeError(f"Git operation failed: {e.stderr}") from e
 
     def cleanup(self):
         if self.repo_dir:
@@ -346,13 +385,13 @@ class Gitlab(BaseBackend):
             "PRIVATE-TOKEN": self.private_token,
             "Content-Type": "application/json",
         }
-        response = requests.post(
-            url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
-        )
-        if not response.ok:
-            self.logger.error(
-                f"Error posting inline discussion note to GitLab: {response.text}"
+        try:
+            response = requests.post(
+                url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
             )
+            response.raise_for_status()
+        except requests.RequestException as e:
+            self.logger.error(f"Error posting inline discussion note to GitLab: {e}")
 
     def post_review(self, text):
         headers = {
@@ -363,77 +402,81 @@ class Gitlab(BaseBackend):
         current_user_id = self.current_user_id
         if not current_user_id:
             # Fallback if load() didn't get it
-            user_url = f"{self.gitlab_url}/api/v4/user"
-            user_resp = requests.get(
-                user_url,
-                headers={"PRIVATE-TOKEN": self.private_token},
-                timeout=REQUEST_TIMEOUT,
-            )
-            if not user_resp.ok:
-                self.logger.error("Could not fetch current user info")
+            try:
+                user_url = f"{self.gitlab_url}/api/v4/user"
+                user_resp = requests.get(
+                    user_url,
+                    headers={"PRIVATE-TOKEN": self.private_token},
+                    timeout=REQUEST_TIMEOUT,
+                )
+                user_resp.raise_for_status()
+                current_user_id = user_resp.json().get("id")
+            except requests.RequestException as e:
+                self.logger.error(f"Could not fetch current user info: {e}")
                 return
-            current_user_id = user_resp.json().get("id")
 
         # 2. Get existing notes
         notes_url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/notes"
-        notes_resp = requests.get(
-            notes_url,
-            headers={"PRIVATE-TOKEN": self.private_token},
-            params={"per_page": 100},
-            timeout=REQUEST_TIMEOUT,
-        )
+        try:
+            notes_resp = requests.get(
+                notes_url,
+                headers={"PRIVATE-TOKEN": self.private_token},
+                params={"per_page": 100},
+                timeout=REQUEST_TIMEOUT,
+            )
+            notes_resp.raise_for_status()
+        except requests.RequestException as e:
+            self.logger.error(f"Error fetching notes: {e}")
+            return
 
         existing_notes = []
-        if notes_resp.ok:
-            for note in notes_resp.json():
-                if (
-                    not note.get("system")
-                    and note.get("author", {}).get("id") == current_user_id
-                ):
-                    # Filter out inline comments (DiffNote)
-                    if note.get("type") != "DiffNote":
-                        existing_notes.append(note)
+        for note in notes_resp.json():
+            if (
+                not note.get("system")
+                and note.get("author", {}).get("id") == current_user_id
+            ):
+                # Filter out inline comments (DiffNote)
+                if note.get("type") != "DiffNote":
+                    existing_notes.append(note)
 
         # 3. Update or post
         if existing_notes:
             # Update the first one
             note_to_update = existing_notes[0]
             update_url = f"{notes_url}/{note_to_update['id']}"
-            update_resp = requests.put(
-                update_url,
-                headers=headers,
-                json={"body": text},
-                timeout=REQUEST_TIMEOUT,
-            )
-            if not update_resp.ok:
-                self.logger.error(
-                    f"Error updating general MR note: {update_resp.status_code}"
+            try:
+                update_resp = requests.put(
+                    update_url,
+                    headers=headers,
+                    json={"body": text},
+                    timeout=REQUEST_TIMEOUT,
                 )
-            else:
+                update_resp.raise_for_status()
                 self.logger.info("Successfully updated existing general MR note.")
+            except requests.RequestException as e:
+                self.logger.error(f"Error updating general MR note: {e}")
 
             # Delete the rest
             for note in existing_notes[1:]:
                 delete_url = f"{notes_url}/{note['id']}"
-                del_resp = requests.delete(
-                    delete_url, headers=headers, timeout=REQUEST_TIMEOUT
-                )
-                if not del_resp.ok:
-                    self.logger.error(
-                        f"Error deleting old general MR note: {del_resp.status_code}"
+                try:
+                    del_resp = requests.delete(
+                        delete_url, headers=headers, timeout=REQUEST_TIMEOUT
                     )
+                    del_resp.raise_for_status()
+                except requests.RequestException as e:
+                    self.logger.error(f"Error deleting old general MR note: {e}")
         else:
             # Post new
             payload = {"body": text}
-            response = requests.post(
-                notes_url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
-            )
-            if not response.ok:
-                self.logger.error(
-                    f"Error posting general MR note to GitLab: {response.status_code}"
+            try:
+                response = requests.post(
+                    notes_url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
                 )
-            else:
+                response.raise_for_status()
                 self.logger.info("Successfully posted new general MR note.")
+            except requests.RequestException as e:
+                self.logger.error(f"Error posting general MR note to GitLab: {e}")
 
     def _resolve_diff_coordinates(self, target_new_path, target_new_line):
         """
