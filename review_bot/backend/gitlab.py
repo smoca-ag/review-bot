@@ -3,7 +3,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-import urllib.parse
+import base64
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urlparse
@@ -229,7 +229,6 @@ class Gitlab(BaseBackend):
 
     def fetch_repository(self):
         self.repo_dir = tempfile.mkdtemp()
-        # Type assertion: repo_dir is now guaranteed to be a non-empty string
         repo_dir = self.repo_dir
 
         project = self.get_project()
@@ -237,11 +236,19 @@ class Gitlab(BaseBackend):
             self.logger.error("Could not get project details for cloning.")
             return
 
-        repo_url = project["http_url_to_repo"]
-        parsed = urllib.parse.urlparse(repo_url)
-        clone_url = parsed._replace(
-            netloc=f"oauth2:{self.private_token}@{parsed.netloc}"
-        ).geturl()
+        # Keep the remote URL completely clean
+        clone_url = project["http_url_to_repo"]
+
+        # 1. Build an HTTP Basic Auth token
+        # GitLab reads tokens over HTTPS using 'oauth2' as the username
+        cred_string = f"oauth2:{self.private_token}"
+        b64_creds = base64.b64encode(cred_string.encode("utf-8")).decode("utf-8")
+
+        # 2. Inject the configuration strictly via the environment block
+        env = os.environ.copy()
+        env["GIT_CONFIG_COUNT"] = "1"
+        env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
+        env["GIT_CONFIG_VALUE_0"] = f"Authorization: Basic {b64_creds}"
 
         with tracer.start_as_current_span("project_checkout") as span:
             span.set_attribute("gitlab.project_id", self.project_id)
@@ -265,6 +272,7 @@ class Gitlab(BaseBackend):
                     cwd=repo_dir,
                 )
 
+                # 3. Pass the custom env dictionary to network operations
                 subprocess.run(
                     [
                         "git",
@@ -279,6 +287,7 @@ class Gitlab(BaseBackend):
                     text=True,
                     timeout=120,
                     cwd=repo_dir,
+                    env=env,  # <--- Git reads the auth header right here
                 )
 
                 target_branch = self.mr.get("target_branch") if self.mr else None
@@ -297,6 +306,7 @@ class Gitlab(BaseBackend):
                         text=True,
                         timeout=120,
                         cwd=repo_dir,
+                        env=env,
                     )
 
                 subprocess.run(
