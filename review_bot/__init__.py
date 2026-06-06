@@ -1,15 +1,11 @@
 import argparse
-import logging
-import os
 import sys
 from enum import Enum
 
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 from review_bot.backend.git import Git
 from review_bot.backend.gitlab import Gitlab
-from review_bot.diff import paths_from_diff, process_diff
 from review_bot.review_bot import review
 
 

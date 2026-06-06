@@ -222,8 +222,12 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
 
         changes = data.get("changes", {})
         if "labels" in changes:
-            prev_labels = [l["title"] for l in changes["labels"].get("previous", [])]
-            curr_labels = [l["title"] for l in changes["labels"].get("current", [])]
+            prev_labels = [
+                label["title"] for label in changes["labels"].get("previous", [])
+            ]
+            curr_labels = [
+                label["title"] for label in changes["labels"].get("current", [])
+            ]
             if (
                 GITLAB_WEBHOOK_LABEL in curr_labels
                 and GITLAB_WEBHOOK_LABEL not in prev_labels
@@ -275,7 +279,7 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
         if trigger_review:
             if mr_url == "N/A" or mr_id == "N/A":
                 logger.error(
-                    f"Could not find MR ID or URL for incoming event. Aborting review."
+                    "Could not find MR ID or URL for incoming event. Aborting review."
                 )
                 return
 
@@ -338,7 +342,7 @@ def main():
         # Use ThreadingHTTPServer to handle multiple concurrent requests
         httpd = http.server.ThreadingHTTPServer(server_address, GitLabWebhookHandler)
 
-        logger.info(f"Starting GitLab webhook server...")
+        logger.info("Starting GitLab webhook server...")
         logger.info(f"Listening on: http://{HOST}:{PORT}")
         logger.info(f"Trigger Label: '{GITLAB_WEBHOOK_LABEL}'")
         logger.info("Token: Set (hidden for security)")
