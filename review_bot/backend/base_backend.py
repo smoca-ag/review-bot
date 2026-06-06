@@ -97,7 +97,7 @@ class BaseBackend:
         except subprocess.TimeoutExpired:
             return "Error: Command timed out after 30 seconds."
         except subprocess.CalledProcessError as e:
-            error_msg = e.stdout.decode("utf-8", errors="replace")
+            error_msg = e.stderr
             if "No such file" in error_msg or "cannot access" in error_msg:
                 return None
             return f"Error reading file {file_path}: {error_msg.strip()}"
@@ -162,7 +162,7 @@ class BaseBackend:
         except subprocess.TimeoutExpired:
             return f"Error: Command timed out after {timeout} seconds."
         except subprocess.CalledProcessError as e:
-            return f"Command failed with exit code {e.returncode}:\n{e.stdout}"
+            return f"Command failed with exit code {e.returncode}:\n{e.stdout}\n{e.stderr}"
         except ValueError:
             return "Error: Failed to parse command."
 
