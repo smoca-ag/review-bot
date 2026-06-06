@@ -218,6 +218,17 @@ def fetch_file_content(
     start_line: int = 1,
     max_lines: int = _MAX_FILE_LINES,
 ) -> str:
+    """
+    Fetch the contents of a specific file from the repository.
+
+    Use this tool to read the source code of a file to understand its implementation.
+    The response is paginated; use `start_line` to read subsequent chunks if the file is large.
+
+    Args:
+        file_path: The path to the file to read.
+        start_line: The line number to start reading from (1-indexed).
+        max_lines: The maximum number of lines to return.
+    """
     try:
         raw = ctx.deps.mr_request.get_file_raw(file_path)
         if raw is None:
@@ -242,6 +253,16 @@ def list_files(
     start_line: int = 1,
     max_lines: int = _MAX_FILE_LINES,
 ) -> str:
+    """
+    List files and directories at a specific path in the repository.
+
+    Use this tool to explore the project structure and find relevant files.
+
+    Args:
+        path: The directory path to list files for (defaults to root ".").
+        start_line: The line number to start reading from for pagination.
+        max_lines: The maximum number of lines to return.
+    """
     try:
         raw = ctx.deps.mr_request.list_files(path)
         if raw.startswith("Error"):
@@ -258,6 +279,17 @@ def scan_code(
     start_line: int = 1,
     max_lines: int = _MAX_FILE_LINES,
 ) -> str:
+    """
+    Search for a text pattern in the repository code.
+
+    Use this tool to find references to functions, classes, or specific strings across the codebase.
+
+    Args:
+        pattern: The text pattern or regex to search for.
+        path: The directory path to constrain the search (defaults to root ".").
+        start_line: The line number to start reading from for pagination.
+        max_lines: The maximum number of lines to return.
+    """
     try:
         raw = ctx.deps.mr_request.scan_code(pattern, path)
         if raw.startswith("Error") or raw == "No matches found.":
@@ -273,6 +305,16 @@ def execute_command(
     start_line: int = 1,
     max_lines: int = _MAX_FILE_LINES,
 ) -> str:
+    """
+    Execute a shell command in the repository context.
+
+    Use this tool to run tests, linters, or other build scripts to verify code correctness.
+
+    Args:
+        command: The shell command to execute.
+        start_line: The line number to start reading output from for pagination.
+        max_lines: The maximum number of lines of output to return.
+    """
     try:
         raw = ctx.deps.mr_request.execute_command(command)
         if raw.startswith("Error"):
@@ -283,6 +325,15 @@ def execute_command(
 
 
 def vector_search(ctx: RunContext[ReviewDeps], query: str, top_k: int = 5) -> str:
+    """
+    Perform a semantic vector search across the codebase.
+
+    Use this tool to find conceptually related code chunks when you don't know the exact keyword or file path.
+
+    Args:
+        query: The semantic search query describing what you're looking for.
+        top_k: The number of top matching code chunks to return.
+    """
     collection = ctx.deps.vector_index
     if collection is None:
         return "Vector search is not available (index not built)."
@@ -409,7 +460,6 @@ async def async_review_process(
             "✅ Sub-agents finished. Passing to Critic Agent for consolidation & filtering..."
         )
 
-
         critic_prompt = (
             "1. Consolidate all reports into a unified review. Remove duplicates.\n"
             "2. RUTHLESSLY FILTER FALSE POSITIVES. Look at the `confidence_score` and `false_positive_reasoning` of every LineComment.\n"
@@ -426,9 +476,7 @@ async def async_review_process(
         critic_prompt += critic_agent_def.specialty_prompt
 
         with tracer.start_as_current_span("agent_critic"):
-            final_result = await agents["critic_agent"].run(
-                critic_prompt, deps=deps
-            )
+            final_result = await agents["critic_agent"].run(critic_prompt, deps=deps)
 
         review_result: FinalReviewResult = final_result.output
 
@@ -501,7 +549,11 @@ def _format_and_post_review(logger, mr_request, review_result, post):
         logger.info(
             f"{comment.file}:{comment.line} (Confidence {comment.confidence_score}): {text}"
         )
-        if post and comment.confidence_score > 0.9 and comment.severity.upper() != "MINOR":
+        if (
+            post
+            and comment.confidence_score > 0.9
+            and comment.severity.upper() != "MINOR"
+        ):
             mr_request.post_line_review(text, comment.file, comment.line)
 
     logger.info("Markdown Output Generated:\n" + markdown_comment)

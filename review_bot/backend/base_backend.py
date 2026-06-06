@@ -143,12 +143,7 @@ class BaseBackend:
             self.logger.info(f"Started Podman container: {self.container_name}")
 
     def execute_command(self, command: str, timeout: int = 60) -> str:
-        """Execute a whitelisted shell command inside the sandboxed container.
-
-        NOTE: Only a limited set of read-only commands are permitted. The command
-        string is parsed with ``shlex.split`` and validated against the whitelist
-        before execution.
-        """
+        """Execute a shell command inside the container"""
         if not self.container_name:
             return "Error: No active container found."
 
