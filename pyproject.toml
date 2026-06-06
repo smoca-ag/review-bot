@@ -35,5 +35,5 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-review-bot = "review_bot:main"
+review-bot = "review_bot.cli:main"
 review-bot-gitlab-webhook = "review_bot.gitlab_webhook:main"

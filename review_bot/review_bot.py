@@ -810,8 +810,14 @@ async def async_review_process(
         logger.info("Review generated but not posted (--post not specified).")
 
 
-def review(spec, backend, post=False):
-    """Synchronous entrypoint for the CLI/Application."""
+def review(spec: str, backend: str | None = None, post: bool = False) -> None:
+    """Synchronous entry point for the CLI / application.
+
+    Args:
+        spec: Full Merge Request URL (gitlab backend) or a git diff ref (git backend).
+        backend: Backend identifier ("git" or "gitlab"). Defaults to "gitlab".
+        post: If True, post the review directly to the merge request.
+    """
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span("review_process") as span:
         span.set_attribute("review.spec", spec)
