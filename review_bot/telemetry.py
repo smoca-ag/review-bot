@@ -25,6 +25,11 @@ def setup_telemetry():
     resource = Resource(attributes={"service.name": "code-review-bot"})
     provider = TracerProvider(resource=resource)
 
+    # Allow telemetry to be disabled entirely
+    if os.getenv("DISABLE_TELEMETRY", "").lower() == "true":
+        print("Telemetry disabled via DISABLE_TELEMETRY.")
+        return
+
     # Check for the STANDARD OpenTelemetry environment variable
     otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 

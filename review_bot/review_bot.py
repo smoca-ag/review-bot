@@ -5,17 +5,27 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal
+from typing import Any, Literal
 
 import chromadb
 import dotenv
 from opentelemetry import trace
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext, Tool
-from pydantic_ai.capabilities import Thinking, WebFetch, WebSearch
+from pydantic_ai.capabilities import Thinking
 
 import review_bot
 from review_bot.telemetry import setup_telemetry
+
+# Module-level logger to avoid creating handlers on every call
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
+    logger.addHandler(handler)
 
 # ==========================================
 # 1. Telemetry & Environment Setup
@@ -160,14 +170,17 @@ def _build_vector_index(repo_dir: str, collection) -> int:
 
             chunks = _chunk_text(text, rel_path)
             if chunks:
-                ids, documents, metadatas = zip(*chunks)
+                # Use explicit list comprehensions to avoid zip(*[]) failing on empty lists
+                ids = [c[0] for c in chunks]
+                documents = [c[1] for c in chunks]
+                metadatas = [
+                    {"file": rel_path, "lines": start_line}
+                    for _, _, start_line in chunks
+                ]
                 collection.add(
-                    ids=list(ids),
-                    documents=list(documents),
-                    metadatas=[
-                        {"file": rel_path, "lines": start_line}
-                        for _, _, start_line in chunks
-                    ],
+                    ids=ids,
+                    documents=documents,
+                    metadatas=metadatas,
                 )
                 count += len(chunks)
 
@@ -179,9 +192,9 @@ def _build_vector_index(repo_dir: str, collection) -> int:
 # ==========================================
 @dataclass
 class ReviewDeps:
-    mr_request: any
+    mr_request: Any
     mr_description: str
-    vector_index: any  # ChromaDB collection for semantic search
+    vector_index: Any  # ChromaDB collection for semantic search
 
 
 class LineComment(BaseModel):
@@ -621,7 +634,7 @@ critic_agent = Agent(
 # ==========================================
 async def run_agent_with_span(agent_name, agent, prompt, deps):
     tracer = trace.get_tracer(__name__)
-    with tracer.start_as_current_span(f"agent_{agent_name}") as span:
+    with tracer.start_as_current_span(f"agent_{agent_name}") as _span:
         return await agent.run(prompt, deps=deps)
 
 
@@ -805,11 +818,6 @@ def review(spec, backend, post=False):
         span.set_attribute("review.backend", backend)
         span.set_attribute("review.post", post)
 
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.INFO)
-        if not logger.handlers:
-            logger.addHandler(logging.StreamHandler(sys.stdout))
-
         mr_request = review_bot.backend_factory(backend)(logger, spec)
         logger.info(f"Load the Merge Request {spec}")
 
@@ -827,30 +835,34 @@ def review(spec, backend, post=False):
 
         # Build vector index for semantic search
         vector_index = None
-        with tracer.start_as_current_span("rag_setup") as span:
-            span.set_attribute("rag.repo_dir", mr_request.repo_dir)
+        chroma_client = None
+        indexed_count = 0
+        with tracer.start_as_current_span("rag_setup") as rag_span:
+            if mr_request.repo_dir:
+                rag_span.set_attribute("rag.repo_dir", mr_request.repo_dir)
             try:
-                client = chromadb.Client()
-                collection = client.create_collection("codebase")
-                indexed_count = _build_vector_index(mr_request.repo_dir, collection)
+                chroma_client = chromadb.Client()
+                collection = chroma_client.create_collection("codebase")
+                if mr_request.repo_dir:
+                    indexed_count = _build_vector_index(mr_request.repo_dir, collection)
 
                 if indexed_count > 0:
                     vector_index = collection
                     logger.info(
                         f"Built vector index with {indexed_count} chunks from {mr_request.repo_dir}"
                     )
-                    span.set_attribute("rag.indexed_chunks", indexed_count)
+                    rag_span.set_attribute("rag.indexed_chunks", indexed_count)
                 else:
                     logger.info("No source files found for vector indexing.")
-                    span.set_attribute("rag.indexed_chunks", 0)
+                    rag_span.set_attribute("rag.indexed_chunks", 0)
             except Exception as e:
                 logger.warning(
                     f"Failed to build vector index: {e}. Vector search will be unavailable."
                 )
-                span.set_attribute("rag.error", str(e))
+                rag_span.set_attribute("rag.error", str(e))
 
         try:
-            diff_content = mr_request.diff()
+            diff_content = mr_request.diff() or ""
             mr_description = mr_request.description() or "No description provided."
 
             secure_prompt = (
@@ -862,16 +874,35 @@ def review(spec, backend, post=False):
             )
 
             # Trigger the async multi-agent flow
-            asyncio.run(
-                async_review_process(
-                    logger,
-                    mr_request,
-                    mr_description,
-                    secure_prompt,
-                    post,
-                    vector_index,
+            # Use get_event_loop().run_until_complete() to support being called from
+            # an existing event loop (e.g., from the webhook server)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop is None:
+                asyncio.run(
+                    async_review_process(
+                        logger,
+                        mr_request,
+                        mr_description,
+                        secure_prompt,
+                        post,
+                        vector_index,
+                    )
                 )
-            )
+            else:
+                loop.run_until_complete(
+                    async_review_process(
+                        logger,
+                        mr_request,
+                        mr_description,
+                        secure_prompt,
+                        post,
+                        vector_index,
+                    )
+                )
         except Exception as e:
             logger.error(
                 f"💥 CRITICAL: Critic agent failed to output valid JSON after retries. Error: {str(e)}"
@@ -882,4 +913,6 @@ def review(spec, backend, post=False):
                 )
             return
         finally:
+            # Clean up ChromaDB client reference to allow GC
+            chroma_client = None
             mr_request.cleanup()

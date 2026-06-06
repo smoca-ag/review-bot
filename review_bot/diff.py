@@ -1,75 +1,95 @@
 import re
-def process_diff(diff_text):
-    """
-     Process a raw diff and yield information about each line change including file paths.
+from typing import Iterator, Literal, Optional, Set, Tuple
 
-     Yields:
-         tuple: (type, old_line_number, new_line_number, content, old_path, new_path)
-     """
+DiffChangeType = Literal["meta", "added", "deleted", "unchanged"]
+DiffLine = Tuple[
+    DiffChangeType, Optional[int], Optional[int], str, Optional[str], Optional[str]
+]
+
+
+def process_diff(diff_text: str) -> Iterator[DiffLine]:
+    """Process a raw diff and yield information about each line change including file paths.
+
+    Args:
+        diff_text: The raw unified diff output from git.
+
+    Yields:
+        tuple: (type, old_line_number, new_line_number, content, old_path, new_path)
+    """
     lines = diff_text.splitlines(True)
 
     # Track current file paths
-    old_path = None
-    new_path = None
+    old_path: Optional[str] = None
+    new_path: Optional[str] = None
 
     # Track positions
     old_line_num = 0
     new_line_num = 0
 
     for line in lines:
-        line = line.rstrip('\n\r')
-        if line.startswith('---'):
+        line = line.rstrip("\n\r")
+        if line.startswith("---"):
             # Extract old path from --- line
-            match = re.match(r'^--- [ab]/(.+)$', line.strip())
+            match = re.match(r"^--- [ab]/(.+)$", line.strip())
             if match:
                 old_path = match.group(1)
             else:
-                match = re.match(r'^--- (.+)$', line.strip())
+                match = re.match(r"^--- (.+)$", line.strip())
                 if match:
                     old_path = match.group(1)
-            yield 'meta', None, None, line, None, None
+            yield "meta", None, None, line, None, None
 
-
-        elif line.startswith('+++'):
+        elif line.startswith("+++"):
             # Extract new path from +++ line
-            match = re.match(r'^\+\+\+ [ab]/(.+)$', line.strip())
+            match = re.match(r"^\+\+\+ [ab]/(.+)$", line.strip())
             if match:
                 new_path = match.group(1)
             else:
-                match = re.match(r'^\+\+\+ (.+)$', line.strip())
+                match = re.match(r"^\+\+\+ (.+)$", line.strip())
                 if match:
                     new_path = match.group(1)
-            yield 'meta', None, None, line, None, None
+            yield "meta", None, None, line, None, None
 
-        elif line.startswith('@@'):
+        elif line.startswith("@@"):
             # Parse hunk header: @@ -1,3 +1,4 @@
             parts = line.strip().split()
             if len(parts) >= 3:
                 old_info = parts[1][1:]  # Remove leading '-'
                 new_info = parts[2][1:]  # Remove leading '+'
 
-                old_start = int(old_info.split(',')[0])
-                new_start = int(new_info.split(',')[0])
+                old_start = int(old_info.split(",")[0])
+                new_start = int(new_info.split(",")[0])
 
                 old_line_num = old_start
                 new_line_num = new_start
 
-        elif line.startswith('+') and not line.startswith('+++'):
-            yield 'added', None, new_line_num, line, old_path, new_path
+        elif line.startswith("+") and not line.startswith("+++"):
+            yield "added", None, new_line_num, line, old_path, new_path
             new_line_num += 1
 
-        elif line.startswith('-') and not line.startswith('---'):
-            yield 'deleted', old_line_num, None, line, old_path, new_path
+        elif line.startswith("-") and not line.startswith("---"):
+            yield "deleted", old_line_num, None, line, old_path, new_path
             old_line_num += 1
 
-        elif line.startswith(' ') or line.startswith('\\'):
-            yield 'unchanged', old_line_num, new_line_num, line, old_path, new_path
+        elif line.startswith(" ") or line.startswith("\\"):
+            yield "unchanged", old_line_num, new_line_num, line, old_path, new_path
             old_line_num += 1
             new_line_num += 1
 
-def paths_from_diff(diff_content):
-    paths = set()
-    for change_type, old_pos, new_pos, content, old_path, new_path in process_diff(diff_content):
+
+def paths_from_diff(diff_content: str) -> Set[str]:
+    """Extract all modified file paths from a diff.
+
+    Args:
+        diff_content: The raw unified diff output from git.
+
+    Returns:
+        Set of file paths that were modified (excluding /dev/null for new/deleted files).
+    """
+    paths: Set[str] = set()
+    for change_type, old_pos, new_pos, content, old_path, new_path in process_diff(
+        diff_content
+    ):
         if new_path is not None and new_path != "/dev/null":
             paths.add(new_path)
     return paths

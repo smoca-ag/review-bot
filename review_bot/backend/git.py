@@ -1,3 +1,4 @@
+import logging
 import os
 import subprocess
 
@@ -9,26 +10,27 @@ tracer = trace.get_tracer(__name__)
 
 
 class Git(BaseBackend):
-    def __init__(self, logger, url):
-        super().__init__()
-        self.url = url
-        self.logger = logger
+    def __init__(self, logger: logging.Logger, url: str):
+        super().__init__(logger, url)
         self.repo_dir = os.path.abspath(".")
 
     def load(self):
         pass
 
     def diff(self):
-        [code, diff] = subprocess.getstatusoutput(f"git diff  {self.url}")
-        if code != 0:
-            raise Exception(diff)
-        return diff
+        """Get the git diff for the specified ref."""
+        result = subprocess.run(
+            ["git", "diff", self.url],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"git diff failed: {result.stderr}")
+        return result.stdout
 
     def title(self):
         return ""
 
     def description(self):
         return ""
-
-    def post_line_review(self, issue, new_path, new_position):
-        pass

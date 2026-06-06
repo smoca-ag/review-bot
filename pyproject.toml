@@ -1,6 +1,6 @@
 [project]
 name = "review_bot"
-description = "A simple but using local llms to review code"
+description = "A simple AI code review bot using local LLMs"
 version = "0.1"
 readme = "Readme.md"
 license = "MIT"
@@ -9,6 +9,7 @@ authors = [
   {name = "David Gunzinger", email = "david.gunzinger@smoca.ch"},
   {name = "Martin Defuns", email = "martin.defuns@smoca.ch"}
 ]
+requires-python = ">=3.11"
 dependencies = [
     "python-dotenv==1.2.2",
     "requests==2.33.1",
@@ -18,6 +19,14 @@ dependencies = [
     "opentelemetry-sdk==1.39.1",
     "opentelemetry-exporter-otlp==1.39.1",
     "chromadb>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
 ]
 
 

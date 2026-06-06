@@ -1,13 +1,46 @@
-import json
+import logging
 import os
+import shutil
+import subprocess
+import tempfile
+import urllib.parse
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urlparse
 
 import requests
+from opentelemetry import trace
 
 from review_bot.backend.base_backend import BaseBackend
 
+logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
-def extract_gitlab_info(url):
+# Default timeout for HTTP requests (seconds)
+REQUEST_TIMEOUT = 30
+
+
+@dataclass
+class GitLabInfo:
+    """Parsed information from a GitLab merge request URL."""
+
+    base_url: str
+    project_id: str
+    merge_request_iid: int
+
+
+def extract_gitlab_info(url: str) -> GitLabInfo:
+    """Extract GitLab instance URL, project path, and MR ID from a GitLab MR URL.
+
+    Args:
+        url: Full GitLab merge request URL.
+
+    Returns:
+        GitLabInfo with parsed components.
+
+    Raises:
+        ValueError: If the URL format is invalid or MR ID cannot be extracted.
+    """
     parsed_url = urlparse(url)
 
     # Extract protocol
@@ -49,16 +82,21 @@ def extract_gitlab_info(url):
             f"Invalid merge request ID '{mr_id}' in URL: {url}. Expected a numeric ID."
         )
 
-    return [f"{protocol}://{host}", quote(project_path, safe=""), mr_id]
+    return GitLabInfo(
+        base_url=f"{protocol}://{host}",
+        project_id=quote(project_path, safe=""),
+        merge_request_iid=mr_id,
+    )
 
 
 class Gitlab(BaseBackend):
-    def __init__(self, logger, url):
-        super().__init__()
-        self.logger = logger
-        [self.gitlab_url, self.project_id, self.merge_request_iid] = (
-            extract_gitlab_info(url)
-        )
+    def __init__(self, logger: logging.Logger, url: str):
+        super().__init__(logger, url)
+        gitlab_info = extract_gitlab_info(url)
+        self.gitlab_url = gitlab_info.base_url
+        self.project_id = gitlab_info.project_id
+        self.merge_request_iid = gitlab_info.merge_request_iid
+
         if not self.gitlab_url:
             raise ValueError(
                 "Error: GitLab URL must be provided (https://gitlab.example.com/example-group/example-project/-/merge_requests/19)"
@@ -67,19 +105,38 @@ class Gitlab(BaseBackend):
         if not self.private_token:
             raise ValueError("Error: GITLAB_API_TOKEN environment variable is not set")
 
+        # Instance attributes set during load()
+        self.current_user_id: Optional[int] = None
+        self.versions: List[Dict[str, Any]] = []
+        self.discussions: List[Dict[str, Any]] = []
+        self.diff_response: Optional[str] = None
+        self.mr: Optional[Dict[str, Any]] = None
+
     def load(self):
+        """Load all required data for the merge request."""
         self.current_user_id = self.get_current_user_id()
-        self.versions = self.get_versions()
-        self.discussions = self.get_discussion()
+        self.versions = self.get_versions() or []
+        if not self.versions:
+            raise RuntimeError("Failed to fetch MR versions. Cannot proceed.")
+
+        self.discussions = self.get_discussion() or []
+
         self.diff_response = self.get_merge_request_diff()
+        if self.diff_response is None:
+            raise RuntimeError("Failed to fetch MR diff. Cannot proceed.")
+
         self.mr = self.get_mr()
+        if self.mr is None:
+            raise RuntimeError("Failed to fetch MR details. Cannot proceed.")
+
         self.fetch_repository()
 
-
-    def get_current_user_id(self):
+    def get_current_user_id(self) -> Optional[int]:
         user_url = f"{self.gitlab_url}/api/v4/user"
         user_resp = requests.get(
-            user_url, headers={"PRIVATE-TOKEN": self.private_token}
+            user_url,
+            headers={"PRIVATE-TOKEN": self.private_token},
+            timeout=REQUEST_TIMEOUT,
         )
         if user_resp.ok:
             return user_resp.json().get("id")
@@ -87,12 +144,12 @@ class Gitlab(BaseBackend):
         return None
 
     def is_open(self) -> bool:
-        if not hasattr(self, "mr") or not self.mr:
+        if not self.mr:
             return False
         return self.mr.get("state") == "opened"
 
     def is_draft(self) -> bool:
-        if not hasattr(self, "mr") or not self.mr:
+        if not self.mr:
             return False
         return self.mr.get("work_in_progress", False) or self.mr.get("draft", False)
 
@@ -100,30 +157,37 @@ class Gitlab(BaseBackend):
         return self.diff_response
 
     def title(self):
+        if not self.mr:
+            return ""
         return self.mr.get("title", "")
 
     def description(self):
+        if not self.mr:
+            return ""
         return self.mr.get("description", "")
 
-    def get_versions(self):
+    def get_versions(self) -> Optional[List[Dict[str, Any]]]:
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/versions"
-        return self.get_json_response(url)
+        result = self.get_json_response(url)
+        return result if isinstance(result, list) else None
 
-    def get_json_response(self, url):
+    def get_json_response(self, url: str) -> Optional[Dict[str, Any]]:
         headers = {"PRIVATE-TOKEN": self.private_token}
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
         if not response.ok:
-            self.logger.error(f"Error fetching {url}: {response}")
+            self.logger.error(f"Error fetching {url}: status {response.status_code}")
             return None
         return response.json()
 
-    def get_paginated_response(self, url):
+    def get_paginated_response(self, url: str) -> List[Dict[str, Any]]:
         headers = {"PRIVATE-TOKEN": self.private_token}
-        results = []
+        results: List[Dict[str, Any]] = []
         while url:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
             if not response.ok:
-                self.logger.error(f"Error fetching {url}: {response}")
+                self.logger.error(
+                    f"Error fetching {url}: status {response.status_code}"
+                )
                 break
 
             data = response.json()
@@ -136,36 +200,30 @@ class Gitlab(BaseBackend):
             url = response.links.get("next", {}).get("url")
         return results
 
-    def get_text_response(self, url):
+    def get_text_response(self, url: str) -> Optional[str]:
         headers = {"PRIVATE-TOKEN": self.private_token}
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
         if not response.ok:
-            self.logger.error(f"Error fetching {url}: {response}")
+            self.logger.error(f"Error fetching {url}: status {response.status_code}")
             return None
         return response.text
 
-    def get_merge_request_diff(self):
+    def get_merge_request_diff(self) -> Optional[str]:
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/raw_diffs"
         return self.get_text_response(url)
 
-    def get_mr(self):
+    def get_mr(self) -> Optional[Dict[str, Any]]:
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}"
         return self.get_json_response(url)
 
-    def get_project(self):
+    def get_project(self) -> Optional[Dict[str, Any]]:
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}"
         return self.get_json_response(url)
 
     def fetch_repository(self):
-        import subprocess
-        import tempfile
-        import urllib.parse
-
-        from opentelemetry import trace
-
-        tracer = trace.get_tracer(__name__)
-
         self.repo_dir = tempfile.mkdtemp()
+        # Type assertion: repo_dir is now guaranteed to be a non-empty string
+        repo_dir = self.repo_dir
 
         project = self.get_project()
         if not project or "http_url_to_repo" not in project:
@@ -181,11 +239,11 @@ class Gitlab(BaseBackend):
         with tracer.start_as_current_span("project_checkout") as span:
             span.set_attribute("gitlab.project_id", self.project_id)
             span.set_attribute("gitlab.merge_request_iid", self.merge_request_iid)
-            span.set_attribute("gitlab.repo_dir", self.repo_dir)
+            span.set_attribute("gitlab.repo_dir", repo_dir)
 
-            subprocess.check_call(["git", "init", self.repo_dir])
+            subprocess.check_call(["git", "init", repo_dir])
             subprocess.check_call(
-                ["git", "remote", "add", "origin", clone_url], cwd=self.repo_dir
+                ["git", "remote", "add", "origin", clone_url], cwd=repo_dir
             )
 
             subprocess.check_call(
@@ -197,10 +255,10 @@ class Gitlab(BaseBackend):
                     "origin",
                     f"refs/merge-requests/{self.merge_request_iid}/head:mr-head",
                 ],
-                cwd=self.repo_dir,
+                cwd=repo_dir,
             )
 
-            target_branch = self.mr.get("target_branch")
+            target_branch = self.mr.get("target_branch") if self.mr else None
             if target_branch:
                 subprocess.check_call(
                     [
@@ -211,28 +269,24 @@ class Gitlab(BaseBackend):
                         "origin",
                         f"refs/heads/{target_branch}:target-branch",
                     ],
-                    cwd=self.repo_dir,
+                    cwd=repo_dir,
                 )
 
-            subprocess.check_call(["git", "checkout", "mr-head"], cwd=self.repo_dir)
+            subprocess.check_call(["git", "checkout", "mr-head"], cwd=repo_dir)
 
     def cleanup(self):
-        import shutil
-
-        if getattr(self, "repo_dir", None):
+        if self.repo_dir:
             try:
                 shutil.rmtree(self.repo_dir)
-                if hasattr(self, "logger"):
-                    self.logger.info(f"Cleaned up repo directory: {self.repo_dir}")
+                self.logger.info(f"Cleaned up repo directory: {self.repo_dir}")
             except Exception as e:
-                if hasattr(self, "logger"):
-                    self.logger.error(f"Failed to clean up repo directory: {e}")
+                self.logger.error(f"Failed to clean up repo directory: {e}")
             finally:
                 self.repo_dir = None
 
         super().cleanup()
 
-    def get_discussion(self):
+    def get_discussion(self) -> Optional[List[Dict[str, Any]]]:
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         return self.get_paginated_response(url)
 
@@ -251,25 +305,31 @@ class Gitlab(BaseBackend):
             return pos if pos is not None else {}
 
         if any(
-                get_pos(note).get("new_path") == new_path
-                and get_pos(note).get("new_line") == new_position
-                and note.get("author", {}).get("id") == self.current_user_id
-                for d in self.discussions
-                if d.get("notes")
-                for note in d["notes"]
+            get_pos(note).get("new_path") == new_path
+            and get_pos(note).get("new_line") == new_position
+            and note.get("author", {}).get("id") == self.current_user_id
+            for d in self.discussions
+            if d.get("notes")
+            for note in d["notes"]
         ):
             self.logger.info(
                 f"Already a discussion by the bot on path {new_path} and position {new_position}"
             )
             return
 
+        # Guard against None/empty versions
+        if not self.versions:
+            self.logger.error("No versions available for posting review.")
+            return
+
+        version = self.versions[0]
         # Build position mapping payload safely
         position = {
             "new_path": new_path,
             "old_path": old_path,
-            "base_sha": self.versions[0]["base_commit_sha"],
-            "start_sha": self.versions[0]["start_commit_sha"],
-            "head_sha": self.versions[0]["head_commit_sha"],
+            "base_sha": version.get("base_commit_sha"),
+            "start_sha": version.get("start_commit_sha"),
+            "head_sha": version.get("head_commit_sha"),
             "position_type": "text",
             "new_line": new_position,
             "old_line": old_position,
@@ -285,9 +345,13 @@ class Gitlab(BaseBackend):
             "PRIVATE-TOKEN": self.private_token,
             "Content-Type": "application/json",
         }
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(
+            url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
+        )
         if not response.ok:
-            self.logger.error(f"Error posting inline discussion note to GitLab: {response.text}")
+            self.logger.error(
+                f"Error posting inline discussion note to GitLab: {response.text}"
+            )
 
     def post_review(self, text):
         headers = {
@@ -300,7 +364,9 @@ class Gitlab(BaseBackend):
             # Fallback if load() didn't get it
             user_url = f"{self.gitlab_url}/api/v4/user"
             user_resp = requests.get(
-                user_url, headers={"PRIVATE-TOKEN": self.private_token}
+                user_url,
+                headers={"PRIVATE-TOKEN": self.private_token},
+                timeout=REQUEST_TIMEOUT,
             )
             if not user_resp.ok:
                 self.logger.error("Could not fetch current user info")
@@ -313,6 +379,7 @@ class Gitlab(BaseBackend):
             notes_url,
             headers={"PRIVATE-TOKEN": self.private_token},
             params={"per_page": 100},
+            timeout=REQUEST_TIMEOUT,
         )
 
         existing_notes = []
@@ -331,7 +398,12 @@ class Gitlab(BaseBackend):
             # Update the first one
             note_to_update = existing_notes[0]
             update_url = f"{notes_url}/{note_to_update['id']}"
-            update_resp = requests.put(update_url, headers=headers, json={"body": text})
+            update_resp = requests.put(
+                update_url,
+                headers=headers,
+                json={"body": text},
+                timeout=REQUEST_TIMEOUT,
+            )
             if not update_resp.ok:
                 self.logger.error(
                     f"Error updating general MR note: {update_resp.status_code}"
@@ -343,7 +415,7 @@ class Gitlab(BaseBackend):
             for note in existing_notes[1:]:
                 delete_url = f"{notes_url}/{note['id']}"
                 del_resp = requests.delete(
-                    delete_url, headers={"PRIVATE-TOKEN": self.private_token}
+                    delete_url, headers=headers, timeout=REQUEST_TIMEOUT
                 )
                 if not del_resp.ok:
                     self.logger.error(
@@ -352,7 +424,9 @@ class Gitlab(BaseBackend):
         else:
             # Post new
             payload = {"body": text}
-            response = requests.post(notes_url, headers=headers, json=payload)
+            response = requests.post(
+                notes_url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
+            )
             if not response.ok:
                 self.logger.error(
                     f"Error posting general MR note to GitLab: {response.status_code}"
@@ -406,12 +480,12 @@ class Gitlab(BaseBackend):
         new_line_counter = 0
 
         for line in diff_hunk_lines:
-            if line.startswith('@@'):
+            if line.startswith("@@"):
                 try:
                     # Extract starting coordinates: @@ -old_start,len +new_start,len @@
-                    parts = line.split(' ')
-                    old_start = int(parts[1].split(',')[0].replace('-', ''))
-                    new_start = int(parts[2].split(',')[0].replace('+', ''))
+                    parts = line.split(" ")
+                    old_start = int(parts[1].split(",")[0].replace("-", ""))
+                    new_start = int(parts[2].split(",")[0].replace("+", ""))
                     old_line_counter = old_start
                     new_line_counter = new_start
                 except (IndexError, ValueError):
@@ -420,19 +494,19 @@ class Gitlab(BaseBackend):
 
             # Check if we reached the line flagged by your linter/bot
             if new_line_counter == target_new_line:
-                if line.startswith('+'):
+                if line.startswith("+"):
                     # It's an added or modified line. GitLab requires old_line to be blank.
                     return old_path, None
-                elif line.startswith(' '):
+                elif line.startswith(" "):
                     # It's an unmodified context line. Return its matched historical line.
                     return old_path, old_line_counter
 
                     # Move line counters forward depending on the diff modification type
-            if line.startswith('+'):
+            if line.startswith("+"):
                 new_line_counter += 1
-            elif line.startswith('-'):
+            elif line.startswith("-"):
                 old_line_counter += 1
-            elif line.startswith(' '):
+            elif line.startswith(" "):
                 old_line_counter += 1
                 new_line_counter += 1
 
