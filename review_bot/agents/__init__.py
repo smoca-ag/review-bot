@@ -7,10 +7,10 @@ from .security import security_agent_def
 from .test import test_agent_def
 
 SUB_AGENTS = [
+    context_agent_def,
     security_agent_def,
     logic_agent_def,
     architecture_agent_def,
-    context_agent_def,
     test_agent_def,
     performance_agent_def,
 ]

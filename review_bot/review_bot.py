@@ -114,65 +114,27 @@ async def async_review_process(
             mr_description=mr_description,
             vector_index=vector_index,
         )
-        with tracer.start_as_current_span("warmup prefix cache"):
-            from review_bot.models import SubAgentReport
-
-            warmup_agent = Agent(
-                model=resolve_model(),
-                deps_type=ReviewDeps,
-                tools=shared_tools,
-                system_prompt=SHARED_SUB_AGENT_SYSTEM_PROMPT,
-                output_type=SubAgentReport,
-            )
-            warmup_specialty_prompt = (
-                "\n\n### YOUR ASSIGNED SPECIALTY ROLE:\n"
-                "You are a Warmup Agent. Your ONLY job is to return an empty report structure.\n"
-                "- DO NOT analyze the code.\n"
-                "- Return empty lists for findings and high-level feedback.\n"
-            )
-            try:
-                # Bumping to 10 tokens gives PydanticAI just enough headroom to process
-                # the start of the stream without throwing an immediate network panic.
-                await warmup_agent.run(
-                    secure_base_prompt + warmup_specialty_prompt,
-                    deps=deps,
-                    model_settings={"max_tokens": 10},
-                )
-                logger.info("⚡ Prefix cache is hot!")
-            except Exception as e:
-                # We catch and swallow the cutoff exception. Even if PydanticAI complains
-                # about an early termination, llama.cpp has ALREADY compiled and cached the giant diff.
-                logger.info(
-                    "⚡ Server prefill completed successfully. Cache is locked and hot!"
-                )
 
         agents = _get_agents()
 
         logger.info(
-            f"🚀 Launching {len(SUB_AGENTS)} specialized agents concurrently (Shared Prefix Cache Enabled)..."
+            f"🚀 Launching {len(SUB_AGENTS)} specialized agents sequentially (Shared Prefix Cache Enabled)..."
         )
 
         # 💡 CACHE OPTIMIZATION: Tailor the specialty instructions as a suffix appended to the identical base prompt sequence.
-        tasks = []
+        reports = {}
         for agent_def in SUB_AGENTS:
             prompt_to_use = (
                 secure_base_prompt_no_diff
                 if agent_def.name == "context"
                 else secure_base_prompt
             )
-            tasks.append(
-                run_agent_with_span(
-                    agent_def.name,
-                    agents[f"{agent_def.name}_agent"],
-                    prompt_to_use + agent_def.specialty_prompt,
-                    deps,
-                )
+            res = await run_agent_with_span(
+                agent_def.name,
+                agents[f"{agent_def.name}_agent"],
+                prompt_to_use + agent_def.specialty_prompt,
+                deps,
             )
-
-        results = await asyncio.gather(*tasks)
-
-        reports = {}
-        for agent_def, res in zip(SUB_AGENTS, results):
             reports[agent_def.name] = res.output
 
         logger.info(

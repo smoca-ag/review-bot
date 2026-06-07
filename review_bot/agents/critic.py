@@ -1,8 +1,8 @@
-from review_bot.models import AgentDef, SubAgentReport
+from review_bot.models import AgentDef, FinalReviewResult
 
 critic_agent_def = AgentDef(
     name="critic",
-    output_type=SubAgentReport,
+    output_type=FinalReviewResult,
     specialty_prompt=(
         "\n\n### YOUR ASSIGNED SPECIALTY ROLE:\n"
         "You are the Final Review Consolidator and Gatekeeper. Your ONLY job is to consolidate reports from various specialized sub-agents.\n"

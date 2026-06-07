@@ -3,7 +3,7 @@ def format_and_post_review(logger, mr_request, review_result, post):
     header_identifier = "# 🤖 AI Review"
 
     markdown_comment = f"{header_identifier} {status_icon}\n"
-    markdown_comment += f"**Summary:** {review_result.summary}\n\n"
+    markdown_comment += f"## Summary\n {review_result.summary}\n\n"
 
     if review_result.description_feedback:
         markdown_comment += (
