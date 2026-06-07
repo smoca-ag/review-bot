@@ -161,28 +161,7 @@ async def async_review_process(
         with tracer.start_as_current_span("agent_critic"):
             final_result = await agents["critic_agent"].run(critic_prompt, deps=deps)
 
-        critic_report = final_result.output
-        context_report = reports.get("context")
-
-        review_result = FinalReviewResult(
-            summary=critic_report.summary,
-            has_purpose=context_report.has_purpose if context_report else False,
-            has_test_plan=context_report.has_test_plan if context_report else False,
-            description_feedback=context_report.high_level_feedback
-            if context_report
-            else [],
-            security_concerns=[],
-            architectural_feedback=[],
-            testing_feedback=[],
-            performance_feedback=[],
-            actionable_feedback=critic_report.high_level_feedback,
-            recommend_approval=not critic_report.findings
-            and not critic_report.high_level_feedback
-            and (context_report.has_purpose if context_report else False)
-            and (context_report.has_test_plan if context_report else False),
-            critical_line_comments=critic_report.findings,
-        )
-
+        review_result = final_result.output
         span = trace.get_current_span()
         for name, report in reports.items():
             if hasattr(report, "findings"):

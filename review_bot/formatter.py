@@ -1,4 +1,7 @@
-def format_and_post_review(logger, mr_request, review_result, post):
+from review_bot.models import FinalReviewResult
+
+
+def format_and_post_review(logger, mr_request, review_result: FinalReviewResult, post):
     status_icon = "✅" if review_result.recommend_approval else "❌"
     header_identifier = "# 🤖 AI Review"
 
