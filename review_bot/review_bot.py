@@ -169,6 +169,7 @@ async def async_review_process(
 
 
 async def review(spec: str, backend: str, post: bool = False) -> None:
+    ensure_setup()
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span("review_process") as span:
         span.set_attribute("review.spec", spec)
