@@ -27,6 +27,21 @@ class LineComment(BaseModel):
     comment: str = Field(description="The comment text.")
 
 
+class SubAgentReport(BaseModel):
+    findings: list[LineComment] = Field(
+        default_factory=list,
+        description="Specific line-by-line issues found. Empty if none.",
+    )
+    high_level_feedback: list[str] = Field(
+        default_factory=list,
+        description="High-level feedback, architectural issues, or general concerns not tied to a specific line.",
+    )
+    summary: str = Field(
+        default="",
+        description="Summary of the agent's findings based on its specialty.",
+    )
+
+
 class FinalReviewResult(BaseModel):
     summary: str = Field(description="A brief summary of the combined findings.")
     has_purpose: bool

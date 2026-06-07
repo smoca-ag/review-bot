@@ -1,15 +1,8 @@
-from pydantic import BaseModel, Field
-from review_bot.models import LineComment, AgentDef
-
-class SecurityReport(BaseModel):
-    findings: list[LineComment] = Field(
-        description="Security vulnerabilities found. Empty if none."
-    )
-    summary: str = Field(description="Summary of security posture.")
+from review_bot.models import AgentDef, SubAgentReport
 
 security_agent_def = AgentDef(
     name="security",
-    output_type=SecurityReport,
+    output_type=SubAgentReport,
     specialty_prompt=(
         "\n\n### YOUR ASSIGNED SPECIALTY ROLE:\n"
         "You are an elite Application Security Engineer. Your ONLY job is to find security vulnerabilities "
@@ -17,5 +10,5 @@ security_agent_def = AgentDef(
         "- IGNORE logic bugs, styling, architecture, tests, or PR descriptions.\n"
         "- Use tools to verify if a variable is sanitized elsewhere before calling it a vulnerability.\n"
         "- If the code is secure, return an empty findings list."
-    )
+    ),
 )
