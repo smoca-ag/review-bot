@@ -58,7 +58,7 @@ def format_and_post_review(logger, mr_request, review_result, post):
         )
         if (
             post
-            and comment.confidence_score > 0.8
+            and comment.confidence_score >= 0.9
             and comment.severity.upper() != "MINOR"
         ):
             mr_request.post_line_review(text, comment.file, comment.line)
