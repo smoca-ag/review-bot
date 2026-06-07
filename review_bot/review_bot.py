@@ -106,7 +106,7 @@ async def async_review_process(
     post,
     vector_index,
 ):
-    """Executes the sub-agents concurrently, then runs the critic."""
+    """Executes the sub-agents in sequence (to keep the prefix cache), then runs the critic."""
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span("async_review_process"):
         deps = ReviewDeps(
