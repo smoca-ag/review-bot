@@ -239,16 +239,17 @@ class Gitlab(BaseBackend):
         # Keep the remote URL completely clean
         clone_url = project["http_url_to_repo"]
 
-        # 1. Build an HTTP Basic Auth token
-        # GitLab reads tokens over HTTPS using 'oauth2' as the username
-        cred_string = f"oauth2:{self.private_token}"
-        b64_creds = base64.b64encode(cred_string.encode("utf-8")).decode("utf-8")
-
-        # 2. Inject the configuration strictly via the environment block
+        # 1. Pass the token securely as an isolated environment variable
         env = os.environ.copy()
+        env["GL_TOKEN"] = self.private_token
+
+        # 2. Inject the custom credential helper via the Git environment block
+        # This allows both regular Git and Git LFS to access the token in-memory
         env["GIT_CONFIG_COUNT"] = "1"
-        env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
-        env["GIT_CONFIG_VALUE_0"] = f"Authorization: Basic {b64_creds}"
+        env["GIT_CONFIG_KEY_0"] = "credential.helper"
+        env["GIT_CONFIG_VALUE_0"] = (
+            '!f() { echo "username=oauth2"; echo "password=$GL_TOKEN"; }; f'
+        )
 
         with tracer.start_as_current_span("project_checkout") as span:
             span.set_attribute("gitlab.project_id", self.project_id)
@@ -287,7 +288,7 @@ class Gitlab(BaseBackend):
                     text=True,
                     timeout=120,
                     cwd=repo_dir,
-                    env=env,  # <--- Git reads the auth header right here
+                    env=env,  # Git reads the auth helper here
                 )
 
                 target_branch = self.mr.get("target_branch") if self.mr else None
@@ -306,16 +307,19 @@ class Gitlab(BaseBackend):
                         text=True,
                         timeout=120,
                         cwd=repo_dir,
-                        env=env,
+                        env=env,  # Git reads the auth helper here
                     )
 
+                # 4. CRITICAL FOR LFS: Pass the env to checkout!
+                # This is when Git LFS executes the smudge filter to download large files.
                 subprocess.run(
                     ["git", "checkout", "mr-head"],
                     check=True,
                     capture_output=True,
                     text=True,
-                    timeout=30,
+                    timeout=120,  # Bumped timeout slightly; LFS downloads take longer
                     cwd=repo_dir,
+                    env=env,  # <--- Git LFS hooks read the auth helper right here
                 )
             except subprocess.TimeoutExpired as e:
                 self.logger.error(f"Git operation timed out: {e}")

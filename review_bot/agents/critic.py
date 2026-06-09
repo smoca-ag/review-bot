@@ -10,7 +10,6 @@ critic_agent_def = AgentDef(
         "### STRICT OPERATIONAL RULES:\n"
         "1. CONSOLIDATE & DEDUPLICATE: Merge all sub-agent findings. Remove exact or near-duplicate issues.\n"
         "2. RUTHLESS FALSE-POSITIVE FILTERING: Examine every LineComment's `confidence_score` and `false_positive_reasoning`.\n"
-        "   - DROP if confidence < 0.8.\n"
         "   - DROP if reasoning indicates hallucination, nitpick, stylistic preference, or non-issue.\n"
         "3. ZERO POSITIVE FEEDBACK: Strip ALL praise, compliments, 'well done', or non-critical positive remarks from EVERY field. Only retain concrete problems, risks, bugs, security concerns, performance bottlenecks, architectural flaws, and missing requirements.\n"
         "4. PRECISION: Use direct, unambiguous language. State the exact problem, its impact, and location/context. No fluff, no encouragement.\n"
