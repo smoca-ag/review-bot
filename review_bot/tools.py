@@ -93,7 +93,7 @@ def scan_code(
         return f"Error scanning code: {str(e)}"
 
 
-def execute_command(
+async def execute_command(
     ctx: RunContext[ReviewDeps],
     command: str,
     start_line: int = 1,
@@ -103,6 +103,8 @@ def execute_command(
     Execute a shell command in the repository context.
 
     Use this tool to run tests, linters, or other build scripts to verify code correctness.
+    Commands execute in a persistent shell session, so stateful commands like `cd` persist
+    across multiple invocations within the same agent.
 
     Args:
         command: The shell command to execute.
@@ -110,7 +112,9 @@ def execute_command(
         max_lines: The maximum number of lines of output to return.
     """
     try:
-        raw = ctx.deps.mr_request.execute_command(command)
+        if ctx.deps.shell is None:
+            return "Error: No shell available."
+        raw = await ctx.deps.shell.execute(command)
         if raw.startswith("Error"):
             return raw
         return paginate_text(raw, start_line, max_lines)

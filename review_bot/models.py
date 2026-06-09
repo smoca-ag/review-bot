@@ -1,7 +1,9 @@
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
+
+from review_bot.backend.base_backend import Shell
 
 
 @dataclass
@@ -9,6 +11,7 @@ class ReviewDeps:
     mr_request: Any
     mr_description: str
     vector_index: Any
+    shell: Optional[Shell] = None
 
 
 class LineComment(BaseModel):
