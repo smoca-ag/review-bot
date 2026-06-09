@@ -131,11 +131,11 @@ async def async_review_process(
                     secure_base_prompt_no_diff
                     if agent_def.name == "context"
                     else secure_base_prompt
-                    )
-                    shell = mr_request.create_shell()
-                    deps.shell = shell
-                    shells.append(shell)
-                    res = await run_agent_with_span(
+                )
+                shell = mr_request.create_shell()
+                deps.shell = shell
+                shells.append(shell)
+                res = await run_agent_with_span(
                     agent_def.name,
                     agents[f"{agent_def.name}_agent"],
                     prompt_to_use + agent_def.specialty_prompt,
