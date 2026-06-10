@@ -147,12 +147,27 @@ class BaseBackend:
                 return None
             return f"Error reading file {file_path}: {error_msg.strip()}"
 
-    def setup_container(self, image: str = "ubuntu:24.04") -> None:
+    def setup_container(self, image: str = "review-bot-env:latest") -> None:
         """Create a sandboxed Podman container with the repository mounted."""
         if not self.repo_dir:
             if self.logger:
                 self.logger.error("No repository directory to mount.")
             return
+
+        # Check if the image exists, build if not
+        img_check = subprocess.run(["podman", "image", "exists", image])
+        if img_check.returncode != 0:
+            if self.logger:
+                self.logger.info(
+                    f"Image {image} not found. Building it now... (This may take a while)"
+                )
+            project_root = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "..")
+            )
+            build_dir = os.path.join(project_root, "review-container")
+            build_result = subprocess.run(["podman", "build", "-t", image, build_dir])
+            if build_result.returncode != 0:
+                raise RuntimeError("Failed to build the review-container image.")
 
         self.container_name = f"review-bot-{uuid.uuid4().hex[:8]}"
         abs_repo_dir = os.path.abspath(self.repo_dir)
@@ -172,9 +187,6 @@ class BaseBackend:
                     "-w",
                     "/workspace",
                     image,
-                    "/bin/sh",
-                    "-c",
-                    "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y systemd systemd-sysv && exec /lib/systemd/systemd",
                 ],
                 capture_output=True,
                 text=True,
@@ -182,32 +194,6 @@ class BaseBackend:
             )
             if result.returncode != 0:
                 raise RuntimeError(f"Failed to start Podman container: {result.stderr}")
-
-            # Install common build tools and runtimes so agents can verify code
-            # across different languages (Python, Node, Ruby, Java, etc.)
-            setup_cmd = (
-                "apt-get update && "
-                "DEBIAN_FRONTEND=noninteractive apt-get install -y "
-                "python3 python3-pip python3-venv "
-                "nodejs npm "
-                "ruby-full "
-                "default-jdk "
-                "curl git build-essential && "
-                "git config --global --add safe.directory /workspace"
-            )
-            subprocess.run(
-                [
-                    "podman",
-                    "exec",
-                    self.container_name,
-                    "/bin/sh",
-                    "-c",
-                    setup_cmd,
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=300,
-            )
 
         except subprocess.TimeoutExpired as e:
             raise RuntimeError(
