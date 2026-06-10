@@ -23,14 +23,6 @@ class BaseBackend:
         """Returns True if the merge request is a draft/WIP."""
         return False
 
-    def create_shell(self) -> Shell:
-        """Return a new :class:`Shell` tied to the current container.
-
-        Raises ``RuntimeError`` if no container is active.
-        """
-        if not self.container_name:
-            raise RuntimeError("No active container found.")
-        return Shell(self.container_name, self.logger)
 
     def list_files(self, path: str = ".") -> str:
         """List files in the repository at the given path inside the container."""

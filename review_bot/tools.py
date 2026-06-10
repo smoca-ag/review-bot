@@ -102,9 +102,9 @@ async def execute_command(
     """
     Execute a shell command in the repository context.
 
-    Use this tool to run tests, linters, or other build scripts to verify code correctness.
-    Commands execute in a persistent shell session, so stateful commands like `cd` persist
-    across multiple invocations within the same agent.
+    Use this tool inside a container to run tests,
+    linters, or other build scripts to verify code correctness.
+    The source code is checked out to /workspace
 
     Args:
         command: The shell command to execute.
