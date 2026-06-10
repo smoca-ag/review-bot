@@ -112,7 +112,7 @@ async def execute_command(
         max_lines: The maximum number of lines of output to return.
     """
     try:
-        raw = await ctx.deps.mr_request.execute_command(command)
+        raw = ctx.deps.mr_request.execute_command(command)
         return paginate_text(raw, start_line, max_lines)
     except Exception as e:
         return f"Error executing command: {str(e)}"

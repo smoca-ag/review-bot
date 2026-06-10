@@ -5,6 +5,7 @@ import subprocess
 import uuid
 from typing import Optional
 
+
 class BaseBackend:
     def __init__(self, logger: logging.Logger, url: str) -> None:
         self.url = url
@@ -22,7 +23,6 @@ class BaseBackend:
     def is_draft(self) -> bool:
         """Returns True if the merge request is a draft/WIP."""
         return False
-
 
     def list_files(self, path: str = ".") -> str:
         """List files in the repository at the given path inside the container."""
@@ -89,7 +89,9 @@ class BaseBackend:
         except subprocess.TimeoutExpired:
             return f"Error: Command timed out after {timeout} seconds."
         except subprocess.CalledProcessError as e:
-            return f"Command failed with exit code {e.returncode}:\n{e.stdout}\n{e.stderr}"
+            return (
+                f"Command failed with exit code {e.returncode}:\n{e.stdout}\n{e.stderr}"
+            )
         except ValueError:
             return "Error: Failed to parse command."
 
