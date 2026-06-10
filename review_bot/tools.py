@@ -104,7 +104,10 @@ async def execute_command(
 
     Use this tool inside a container to run tests,
     linters, or other build scripts to verify code correctness.
-    The source code is checked out to /workspace
+    The source code is checked out to /workspace.
+
+    You are strongly encouraged to use this tool to verify your findings.
+    For example: `pytest tests/`, `mypy src/`, `npm run test`, `node -e "..."`, `python -c "..."`.
 
     Args:
         command: The shell command to execute.

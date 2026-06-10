@@ -48,14 +48,35 @@ class BaseBackend:
             return "Error: No active container found."
 
         try:
+            # First ensure git safe directory is set in this exec session just in case
+            subprocess.run(
+                [
+                    "podman",
+                    "exec",
+                    "-w",
+                    "/workspace",
+                    self.container_name,
+                    "git",
+                    "config",
+                    "--global",
+                    "--add",
+                    "safe.directory",
+                    "/workspace",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
             output = subprocess.run(
                 [
                     "podman",
                     "exec",
+                    "-w",
+                    "/workspace",
                     self.container_name,
-                    "git",
                     "grep",
-                    "-n",
+                    "-rn",
                     pattern,
                     path,
                 ],
@@ -126,7 +147,7 @@ class BaseBackend:
                 return None
             return f"Error reading file {file_path}: {error_msg.strip()}"
 
-    def setup_container(self, image: str = "python:3.11") -> None:
+    def setup_container(self, image: str = "ubuntu:24.04") -> None:
         """Create a sandboxed Podman container with the repository mounted."""
         if not self.repo_dir:
             if self.logger:
@@ -136,6 +157,7 @@ class BaseBackend:
         self.container_name = f"review-bot-{uuid.uuid4().hex[:8]}"
         abs_repo_dir = os.path.abspath(self.repo_dir)
         try:
+            # Create a container that runs indefinitely
             result = subprocess.run(
                 [
                     "podman",
@@ -159,6 +181,33 @@ class BaseBackend:
             )
             if result.returncode != 0:
                 raise RuntimeError(f"Failed to start Podman container: {result.stderr}")
+
+            # Install common build tools and runtimes so agents can verify code
+            # across different languages (Python, Node, Ruby, Java, etc.)
+            setup_cmd = (
+                "apt-get update && "
+                "DEBIAN_FRONTEND=noninteractive apt-get install -y "
+                "python3 python3-pip python3-venv "
+                "nodejs npm "
+                "ruby-full "
+                "default-jdk "
+                "curl git build-essential && "
+                "git config --global --add safe.directory /workspace"
+            )
+            subprocess.run(
+                [
+                    "podman",
+                    "exec",
+                    self.container_name,
+                    "/bin/sh",
+                    "-c",
+                    setup_cmd,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=300,
+            )
+
         except subprocess.TimeoutExpired as e:
             raise RuntimeError(
                 f"Failed to start Podman container (timeout): {e}"
