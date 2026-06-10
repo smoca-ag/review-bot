@@ -112,11 +112,7 @@ async def execute_command(
         max_lines: The maximum number of lines of output to return.
     """
     try:
-        if ctx.deps.shell is None:
-            return "Error: No shell available."
-        raw = await ctx.deps.shell.execute(command)
-        if raw.startswith("Error"):
-            return raw
+        raw = await ctx.deps.mr_request.execute(command)
         return paginate_text(raw, start_line, max_lines)
     except Exception as e:
         return f"Error executing command: {str(e)}"
