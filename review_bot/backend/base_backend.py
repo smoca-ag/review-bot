@@ -78,7 +78,7 @@ class BaseBackend:
 
         try:
             output = subprocess.run(
-                ["podman", "exec", "/bin/sh", "-c", command],
+                ["podman", "exec", self.container_name, "/bin/sh", "-c", command],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,

@@ -29,7 +29,14 @@ def build_vector_index(repo_dir: str, collection) -> int:
         ".md",
     }
     count = 0
-    for root, _, files in os.walk(repo_dir):
+    for root, dirs, files in os.walk(repo_dir):
+        # Exclude common large/hidden directories
+        dirs[:] = [
+            d
+            for d in dirs
+            if not d.startswith(".")
+            and d not in ("__pycache__", "node_modules", "venv", "env")
+        ]
         for f in files:
             ext = os.path.splitext(f)[1].lower()
             if ext not in source_extensions:
