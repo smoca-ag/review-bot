@@ -89,3 +89,84 @@ def paginate_text(
 
 def is_binary(content: bytes) -> bool:
     return b"\x00" in content
+
+
+def resolve_diff_coordinates(
+    diff_response: str | None, target_new_path: str, target_new_line: int
+) -> tuple[str, int | None]:
+    """
+    Parses a diff to find the true historical old_path (handling renames)
+    and maps target_new_line to its corresponding old_line based on diff hunks.
+    """
+    if not diff_response:
+        return target_new_path, None
+
+    lines = diff_response.splitlines()
+    i = 0
+    num_lines = len(lines)
+
+    old_path = target_new_path
+    diff_hunk_lines = []
+    found_file = False
+
+    # Clean up target path matching
+    target_new_path = target_new_path.lstrip("/") if target_new_path else ""
+
+    # 1. Isolate the target file's diff block and extract the original path
+    while i < num_lines:
+        line = lines[i]
+        if line.startswith("+++ b/") and line[6:].lstrip("/") == target_new_path:
+            found_file = True
+            # Look at the immediate preceding line for the historical path
+            if i > 0 and lines[i - 1].startswith("--- a/"):
+                extracted_old = lines[i - 1][6:].lstrip("/")
+                if extracted_old != "dev/null":
+                    old_path = extracted_old
+
+            # Collect the diff patch lines for this specific file
+            i += 1
+            while i < num_lines and not lines[i].startswith("diff --git"):
+                diff_hunk_lines.append(lines[i])
+                i += 1
+            break
+        i += 1
+
+    if not found_file:
+        return old_path, None
+
+    # 2. Reconstruct line numbers by parsing unified diff hunks (@@)
+    old_line_counter = 0
+    new_line_counter = 0
+
+    for line in diff_hunk_lines:
+        if line.startswith("@@"):
+            try:
+                # Extract starting coordinates: @@ -old_start,len +new_start,len @@
+                parts = line.split(" ")
+                old_start = int(parts[1].split(",")[0].replace("-", ""))
+                new_start = int(parts[2].split(",")[0].replace("+", ""))
+                old_line_counter = old_start
+                new_line_counter = new_start
+            except (IndexError, ValueError):
+                continue
+            continue
+
+        # Check if we reached the line flagged by your linter/bot
+        if new_line_counter == target_new_line:
+            if line.startswith("+"):
+                # It's an added or modified line. GitLab requires old_line to be blank.
+                return old_path, None
+            elif line.startswith(" "):
+                # It's an unmodified context line. Return its matched historical line.
+                return old_path, old_line_counter
+
+        # Move line counters forward depending on the diff modification type
+        if line.startswith("+"):
+            new_line_counter += 1
+        elif line.startswith("-"):
+            old_line_counter += 1
+        elif line.startswith(" "):
+            old_line_counter += 1
+            new_line_counter += 1
+
+    return old_path, None

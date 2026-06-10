@@ -102,7 +102,6 @@ async def async_review_process(
     mr_request,
     mr_description,
     secure_base_prompt,
-    secure_base_prompt_no_diff,
     post,
     vector_index,
 ):
@@ -124,15 +123,10 @@ async def async_review_process(
         # 💡 CACHE OPTIMIZATION: Tailor the specialty instructions as a suffix appended to the identical base prompt sequence.
         reports = {}
         for agent_def in SUB_AGENTS:
-            prompt_to_use = (
-                secure_base_prompt_no_diff
-                if agent_def.name == "context"
-                else secure_base_prompt
-            )
             res = await run_agent_with_span(
                 agent_def.name,
                 agents[f"{agent_def.name}_agent"],
-                prompt_to_use + agent_def.specialty_prompt,
+                secure_base_prompt + agent_def.specialty_prompt,
                 deps,
             )
             reports[agent_def.name] = res.output
@@ -148,11 +142,8 @@ async def async_review_process(
             safe_report = wrap_in_cdata(report.model_dump_json())
             critic_prompt += f"### {name.upper()} REPORT:\n<{name}_report>\n{safe_report}\n</{name}_report>\n\n"
 
-
         with tracer.start_as_current_span("agent_critic"):
-            final_result = await agents["critic_agent"].run(
-                critic_prompt, deps=deps
-            )
+            final_result = await agents["critic_agent"].run(critic_prompt, deps=deps)
 
         review_result = final_result.output
         span = trace.get_current_span()
@@ -219,20 +210,12 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
                 f"### CURRENT DATE:\n{date.today().isoformat()}"
             )
 
-            secure_base_prompt_no_diff = (
-                f"Review the following Merge Request details:\n\n"
-                f"### MR TITLE:\n<title>\n{wrap_in_cdata(title)}\n</title>\n\n"
-                f"### MR DESCRIPTION:\n<description>\n{wrap_in_cdata(mr_description)}\n</description>\n\n"
-                f"### CURRENT DATE:\n{date.today().isoformat()}"
-            )
-
             try:
                 await async_review_process(
                     logger,
                     mr_request,
                     mr_description,
                     secure_base_prompt,
-                    secure_base_prompt_no_diff,
                     post,
                     vector_index,
                 )
