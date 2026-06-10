@@ -11,7 +11,6 @@ from pydantic_ai.capabilities import Thinking
 
 import review_bot
 from review_bot.agents import SUB_AGENTS, critic_agent_def
-from review_bot.backend.base_backend import Shell
 
 # Refactored module imports
 from review_bot.config import ensure_setup, resolve_model
@@ -124,59 +123,48 @@ async def async_review_process(
 
         # 💡 CACHE OPTIMIZATION: Tailor the specialty instructions as a suffix appended to the identical base prompt sequence.
         reports = {}
-        shells: list[Shell] = []
-        try:
-            for agent_def in SUB_AGENTS:
-                prompt_to_use = (
-                    secure_base_prompt_no_diff
-                    if agent_def.name == "context"
-                    else secure_base_prompt
-                )
-                shell = mr_request.create_shell()
-                deps.shell = shell
-                shells.append(shell)
-                res = await run_agent_with_span(
-                    agent_def.name,
-                    agents[f"{agent_def.name}_agent"],
-                    prompt_to_use + agent_def.specialty_prompt,
-                    deps,
-                )
-                reports[agent_def.name] = res.output
+        for agent_def in SUB_AGENTS:
+            prompt_to_use = (
+                secure_base_prompt_no_diff
+                if agent_def.name == "context"
+                else secure_base_prompt
+            )
+            res = await run_agent_with_span(
+                agent_def.name,
+                agents[f"{agent_def.name}_agent"],
+                prompt_to_use + agent_def.specialty_prompt,
+                deps,
+            )
+            reports[agent_def.name] = res.output
 
-            logger.info(
-                "✅ Sub-agents finished. Passing to Critic Agent for consolidation & filtering..."
+        logger.info(
+            "✅ Sub-agents finished. Passing to Critic Agent for consolidation & filtering..."
+        )
+
+        critic_prompt = critic_agent_def.specialty_prompt
+        for name, report in reports.items():
+            if name == "context":
+                continue
+            safe_report = wrap_in_cdata(report.model_dump_json())
+            critic_prompt += f"### {name.upper()} REPORT:\n<{name}_report>\n{safe_report}\n</{name}_report>\n\n"
+
+
+        with tracer.start_as_current_span("agent_critic"):
+            final_result = await agents["critic_agent"].run(
+                critic_prompt, deps=deps
             )
 
-            critic_prompt = critic_agent_def.specialty_prompt
-            for name, report in reports.items():
-                if name == "context":
-                    continue
-                safe_report = wrap_in_cdata(report.model_dump_json())
-                critic_prompt += f"### {name.upper()} REPORT:\n<{name}_report>\n{safe_report}\n</{name}_report>\n\n"
+        review_result = final_result.output
+        span = trace.get_current_span()
+        for name, report in reports.items():
+            if hasattr(report, "findings"):
+                span.set_attribute(f"review.{name}_findings", len(report.findings))
+        span.set_attribute(
+            "review.final_critical_comments",
+            len(review_result.critical_line_comments),
+        )
 
-            shell = mr_request.create_shell()
-            deps.shell = shell
-            shells.append(shell)
-
-            with tracer.start_as_current_span("agent_critic"):
-                final_result = await agents["critic_agent"].run(
-                    critic_prompt, deps=deps
-                )
-
-            review_result = final_result.output
-            span = trace.get_current_span()
-            for name, report in reports.items():
-                if hasattr(report, "findings"):
-                    span.set_attribute(f"review.{name}_findings", len(report.findings))
-            span.set_attribute(
-                "review.final_critical_comments",
-                len(review_result.critical_line_comments),
-            )
-
-            format_and_post_review(logger, mr_request, review_result, post)
-        finally:
-            for shell in shells:
-                await shell.close()
+        format_and_post_review(logger, mr_request, review_result, post)
 
 
 async def review(spec: str, backend: str, post: bool = False) -> None:

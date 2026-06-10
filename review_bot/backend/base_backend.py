@@ -5,155 +5,6 @@ import subprocess
 import uuid
 from typing import Optional
 
-
-class Shell:
-    """Persistent interactive shell inside a Podman container.
-
-    Each instance owns a single ``podman exec -i /bin/sh`` process.
-    Commands are sent to the shared shell so that stateful operations
-    (``cd``, ``export``, etc.) persist across calls.
-    """
-
-    def __init__(
-        self, container_name: str, logger: Optional[logging.Logger] = None
-    ) -> None:
-        self.container_name = container_name
-        self.logger = logger
-        self._marker: str = f"\x01{uuid.uuid4().hex}\x01"
-        self._process: Optional[asyncio.subprocess.Process] = None
-        self._lock = asyncio.Lock()
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    async def _ensure_process(self) -> asyncio.subprocess.Process:
-        """Start (or restart) the shell process if needed."""
-        if self._process is not None and self._process.returncode is None:
-            return self._process
-
-        self._process = await asyncio.create_subprocess_exec(
-            "podman",
-            "exec",
-            "-i",
-            "-e",
-            f"PS1={self._marker}",
-            self.container_name,
-            "/bin/sh",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        proc = self._process
-
-        # Merge stderr → stdout inside the shell so command errors appear
-        # in the captured output.
-        if proc.stdin is None:
-            raise RuntimeError("Shell stdin unavailable.")
-        proc.stdin.write(b"exec 2>&1\n")
-        try:
-            await asyncio.wait_for(proc.stdin.drain(), timeout=10)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            raise RuntimeError("Shell init drain timed out.")
-
-        # Consume the initial prompt (PS1 is printed right after shell starts).
-        if proc.stdout is None:
-            proc.kill()
-            await proc.wait()
-            raise RuntimeError("Shell stdout unavailable.")
-        try:
-            await asyncio.wait_for(
-                proc.stdout.readuntil(self._marker.encode()),
-                timeout=10,
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            raise RuntimeError("Shell did not respond.")
-        except Exception:
-            # Covers LimitError (buffer overflow) and any other read failure.
-            proc.kill()
-            await proc.wait()
-            raise RuntimeError("Shell init read failed.")
-
-        if self.logger:
-            self.logger.info(
-                "Created persistent shell in container %s", self.container_name
-            )
-
-        return proc
-
-    @staticmethod
-    async def _read_until(
-        stream: asyncio.StreamReader, marker: bytes, timeout: int
-    ) -> bytes:
-        """Read from *stream* until *marker* appears, handling large outputs."""
-        buffer = b""
-        deadline = asyncio.get_event_loop().time() + timeout
-        while True:
-            remaining = deadline - asyncio.get_event_loop().time()
-            if remaining <= 0:
-                raise asyncio.TimeoutError()
-            data = await asyncio.wait_for(
-                stream.read(8192), timeout=max(remaining, 0.1)
-            )
-            if not data:
-                break  # EOF
-            buffer += data
-            if marker in buffer:
-                idx = buffer.index(marker)
-                return buffer[:idx]
-        raise asyncio.TimeoutError()
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    async def execute(self, command: str, timeout: int = 60) -> str:
-        """Run *command* in the persistent shell and return its output."""
-        async with self._lock:
-            proc = await self._ensure_process()
-            marker = self._marker.encode()
-
-            if proc.stdin is None or proc.stdout is None:
-                proc.kill()
-                await proc.wait()
-                self._process = None
-                return "Error: Shell I/O unavailable."
-
-            try:
-                proc.stdin.write(f"{command}\n".encode())
-                await asyncio.wait_for(proc.stdin.drain(), timeout=timeout)
-                output = await self._read_until(proc.stdout, marker, timeout)
-                return output.decode("utf-8", errors="replace")
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                self._process = None
-                return f"Error: Command timed out after {timeout} seconds."
-            except Exception as exc:
-                proc.kill()
-                await proc.wait()
-                self._process = None
-                return f"Error executing command: {exc}"
-
-    async def close(self) -> None:
-        """Gracefully shut down the shell process."""
-        if self._process is not None and self._process.returncode is None:
-            if self._process.stdin is not None:
-                self._process.stdin.close()
-            try:
-                await asyncio.wait_for(self._process.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                self._process.kill()
-                await self._process.wait()
-            if self.logger:
-                self.logger.info("Closed persistent shell")
-
-
 class BaseBackend:
     def __init__(self, logger: logging.Logger, url: str) -> None:
         self.url = url
@@ -227,6 +78,28 @@ class BaseBackend:
             if e.returncode == 1:
                 return "No matches found."
             return f"Error scanning code: {e.stdout.strip()}"
+
+    def execute_command(self, command: str, timeout: int = 60) -> str:
+        """Execute a shell command inside the container"""
+        if not self.container_name:
+            return "Error: No active container found."
+
+        try:
+            output = subprocess.run(
+                ["podman", "exec", "/bin/sh", "-c", command],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=timeout,
+                check=True,
+            )
+            return output.stdout
+        except subprocess.TimeoutExpired:
+            return f"Error: Command timed out after {timeout} seconds."
+        except subprocess.CalledProcessError as e:
+            return f"Command failed with exit code {e.returncode}:\n{e.stdout}\n{e.stderr}"
+        except ValueError:
+            return "Error: Failed to parse command."
 
     def get_file_raw(self, file_path: str) -> Optional[str]:
         """Return raw file content from the container without line-number formatting.
