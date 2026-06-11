@@ -126,7 +126,8 @@ async def async_review_process(
             "✅ Sub-agents finished. Passing to Critic Agent for consolidation & filtering..."
         )
 
-        critic_prompt = critic_agent_def.specialty_prompt
+        # Include MR context so the critic can verify sub-agent claims against source material
+        critic_prompt = secure_base_prompt + critic_agent_def.specialty_prompt
         for name, report in reports.items():
             safe_report = wrap_in_cdata(report.model_dump_json())
             critic_prompt += f"### {name.upper()} REPORT:\n<{name}_report>\n{safe_report}\n</{name}_report>\n\n"
