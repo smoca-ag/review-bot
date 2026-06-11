@@ -48,26 +48,6 @@ class BaseBackend:
             return "Error: No active container found."
 
         try:
-            # First ensure git safe directory is set in this exec session just in case
-            subprocess.run(
-                [
-                    "podman",
-                    "exec",
-                    "-w",
-                    "/workspace",
-                    self.container_name,
-                    "git",
-                    "config",
-                    "--global",
-                    "--add",
-                    "safe.directory",
-                    "/workspace",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-
             output = subprocess.run(
                 [
                     "podman",
