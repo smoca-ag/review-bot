@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 import sys
 from datetime import date
 
@@ -52,46 +51,32 @@ SHARED_SUB_AGENT_SYSTEM_PROMPT = (
     "5. SELF-IMPROVEMENT: If you encounter a limitation that prevents you from verifying a finding or performing your review (missing tool, missing dependency, unclear context), use the `suggest_bot_improvement` tool to report it. Be specific about what is missing and what would help.\n"
 )
 
-_agent_cache: dict = {}
-_agent_cache_key: tuple = ()  # (model, telemetry flag) used for invalidation
-
-
 def _get_agents() -> dict:
-    """Return the agent instances, creating them lazily on first access.
+    """Create and return fresh agent instances for this review run."""
+    ensure_setup()
+    model = resolve_model()
 
-    The cache is invalidated when the resolved model configuration changes
-    (e.g. after a dotenv reload or environment-variable change).
-    """
-    global _agent_cache, _agent_cache_key
+    agent_config = {
+        "model": model,
+        "deps_type": ReviewDeps,
+        "tools": shared_tools,
+        "retries": 3,
+        "capabilities": [Thinking(effort="high")],
+        "model_settings": {"timeout": 1800},
+        "system_prompt": SHARED_SUB_AGENT_SYSTEM_PROMPT,
+    }
 
-    cache_key = (resolve_model(), os.getenv("DISABLE_TELEMETRY", ""))
-    if not _agent_cache or _agent_cache_key != cache_key:
-        ensure_setup()
-        model = resolve_model()
-        _agent_cache_key = cache_key
-
-        # All sub-agents share the identical system prompt configuration.
-        # Personas are assigned in the user prompt to maximize KV cache hits.
-        agent_config = {
-            "model": model,
-            "deps_type": ReviewDeps,
-            "tools": shared_tools,
-            "retries": 3,
-            "capabilities": [Thinking(effort="high")],
-            "model_settings": {"timeout": 1800},
-            "system_prompt": SHARED_SUB_AGENT_SYSTEM_PROMPT,
-        }
-
-        for agent_def in SUB_AGENTS:
-            _agent_cache[f"{agent_def.name}_agent"] = Agent(
-                output_type=agent_def.output_type, **agent_config
-            )
-
-        critic_config = agent_config.copy()
-        _agent_cache["critic_agent"] = Agent(
-            output_type=critic_agent_def.output_type, **critic_config
+    agents = {}
+    for agent_def in SUB_AGENTS:
+        agents[f"{agent_def.name}_agent"] = Agent(
+            output_type=agent_def.output_type, **agent_config
         )
-    return _agent_cache
+
+    critic_config = agent_config.copy()
+    agents["critic_agent"] = Agent(
+        output_type=critic_agent_def.output_type, **critic_config
+    )
+    return agents
 
 
 # ==========================================
