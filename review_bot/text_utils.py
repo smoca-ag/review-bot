@@ -308,6 +308,10 @@ def resolve_diff_coordinates(
                 continue
             continue
 
+        # Skip "\\ No newline at end of file" – doesn't advance line counters
+        if line.startswith("\\"):
+            continue
+
         # Check if we reached the line flagged by your linter/bot
         if new_line_counter == target_new_line:
             if line.startswith("+"):

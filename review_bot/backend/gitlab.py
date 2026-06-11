@@ -389,7 +389,8 @@ class Gitlab(BaseBackend):
             self.logger.error("No versions available for posting review.")
             return
 
-        version = self.versions[0]
+        # Use the latest version to get current commit SHAs
+        version = self.versions[-1]
         # Build position mapping payload safely
         position = {
             "new_path": new_path,
