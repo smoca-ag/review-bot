@@ -114,7 +114,7 @@ class Gitlab(BaseBackend):
         self.diff_response: str
         self.mr: Optional[Dict[str, Any]] = None
 
-    def load(self):
+    def load(self) -> None:
         """Load all required data for the merge request."""
         self.current_user_id = self.get_current_user_id()
         self.versions = self.get_versions() or []
@@ -158,15 +158,15 @@ class Gitlab(BaseBackend):
             return False
         return self.mr.get("work_in_progress", False) or self.mr.get("draft", False)
 
-    def diff(self):
+    def diff(self) -> str:
         return self.diff_response
 
-    def title(self):
+    def title(self) -> str:
         if not self.mr:
             return ""
         return self.mr.get("title", "")
 
-    def description(self):
+    def description(self) -> str:
         if not self.mr:
             return ""
         return self.mr.get("description", "")
@@ -229,7 +229,7 @@ class Gitlab(BaseBackend):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}"
         return self.get_json_response(url)
 
-    def fetch_repository(self):
+    def fetch_repository(self) -> None:
         repo_dir = tempfile.mkdtemp()
 
         try:
@@ -340,7 +340,7 @@ class Gitlab(BaseBackend):
                 self.logger.error(f"Failed to clean up temp repo directory: {e}")
             raise
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         if self.repo_dir:
             try:
                 shutil.rmtree(self.repo_dir)
@@ -356,7 +356,7 @@ class Gitlab(BaseBackend):
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         return self.get_paginated_response(url)
 
-    def post_line_review(self, text, new_path, new_position):
+    def post_line_review(self, text: str, new_path: str, new_position: int) -> None:
         if new_path == "/dev/null" or not new_path:
             return  # Can't review a completely deleted file
 
@@ -420,7 +420,7 @@ class Gitlab(BaseBackend):
         except requests.RequestException as e:
             self.logger.error(f"Error posting inline discussion note to GitLab: {e}")
 
-    def post_review(self, text):
+    def post_review(self, text: str) -> None:
         headers = {
             "PRIVATE-TOKEN": self.private_token,
             "Content-Type": "application/json",

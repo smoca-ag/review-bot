@@ -14,10 +14,10 @@ class Git(BaseBackend):
         super().__init__(logger, url)
         self.repo_dir = os.path.abspath(".")
 
-    def load(self):
+    def load(self) -> None:
         pass
 
-    def diff(self):
+    def diff(self) -> str:
         """Get the git diff for the specified ref."""
         result = subprocess.run(
             ["git", "diff", self.url],
@@ -29,8 +29,8 @@ class Git(BaseBackend):
             raise RuntimeError(f"git diff failed: {result.stderr}")
         return result.stdout
 
-    def title(self):
+    def title(self) -> str:
         return ""
 
-    def description(self):
+    def description(self) -> str:
         return ""
