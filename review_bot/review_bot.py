@@ -17,7 +17,11 @@ from review_bot.config import ensure_setup, resolve_model
 from review_bot.formatter import format_and_post_review
 from review_bot.models import FinalReviewResult, ReviewDeps
 from review_bot.rag import build_vector_index
-from review_bot.text_utils import inject_line_numbers, wrap_in_cdata
+from review_bot.text_utils import (
+    inject_line_numbers,
+    truncate_large_diff_files,
+    wrap_in_cdata,
+)
 from review_bot.tools import shared_tools
 
 # Module-level logger to avoid creating handlers on every call
@@ -199,6 +203,13 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
 
         try:
             diff_content = mr_request.diff() or ""
+
+            # Truncate large files in the diff to save tokens
+            if diff_content:
+                diff_content = truncate_large_diff_files(diff_content)
+                if diff_content != (mr_request.diff() or ""):
+                    logger.info("Applied diff truncation for large files.")
+
             mr_description = mr_request.description() or "No description provided."
             title = mr_request.title() or "No title provided."
 

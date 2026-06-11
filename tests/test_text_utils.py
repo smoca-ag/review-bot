@@ -1,11 +1,14 @@
 import unittest
 
 from review_bot.text_utils import (
+    _MAX_LINE_LENGTH,
+    _truncate_long_line,
     chunk_text,
     inject_line_numbers,
     is_binary,
     paginate_text,
     resolve_diff_coordinates,
+    truncate_large_diff_files,
     wrap_in_cdata,
 )
 
@@ -289,6 +292,200 @@ index c76db87..2818a01 100644
         self.assertTrue(is_binary(b"hello\x00world"))
         self.assertFalse(is_binary(b"hello world"))
         self.assertFalse(is_binary("hello world".encode("utf-8")))
+
+
+class TestTruncation(unittest.TestCase):
+    """Tests for truncate_large_diff_files and _truncate_long_line."""
+
+    # -- _truncate_long_line --
+
+    def test_truncate_long_line_short_line_unchanged(self):
+        """Lines shorter than max_length pass through untouched."""
+        line = "+short line\n"
+        self.assertEqual(_truncate_long_line(line, 100), line)
+
+    def test_truncate_long_line_addition(self):
+        """A very long addition line is truncated."""
+        body = "x" * 300
+        line = f"+{body}\n"
+        result = _truncate_long_line(line, 150)
+        self.assertLess(len(result), len(line))
+        self.assertTrue(result.startswith("+"))
+        self.assertIn("[truncated", result)
+        self.assertIn("chars]", result)
+        self.assertTrue(result.endswith("\n"))
+
+    def test_truncate_long_line_deletion(self):
+        """A very long deletion line is truncated."""
+        body = "y" * 500
+        line = f"-{body}\n"
+        result = _truncate_long_line(line, 150)
+        self.assertLess(len(result), len(line))
+        self.assertTrue(result.startswith("-"))
+        self.assertIn("[truncated", result)
+
+    def test_truncate_long_line_context(self):
+        """A very long context line is truncated."""
+        body = "z" * 400
+        line = f" {body}\n"
+        result = _truncate_long_line(line, 150)
+        self.assertLess(len(result), len(line))
+        self.assertTrue(result.startswith(" "))
+        self.assertIn("[truncated", result)
+
+    def test_truncate_long_line_hunk_header_preserved(self):
+        """@@ hunk headers are never truncated so inject_line_numbers works."""
+        line = "@@ -1,500 +1,500 @@ some function name\n"
+        result = _truncate_long_line(line, 50)
+        self.assertEqual(result, line)
+
+    def test_truncate_long_line_no_newline(self):
+        """Lines without trailing newline are handled correctly."""
+        body = "a" * 300
+        line = f"+{body}"
+        result = _truncate_long_line(line, 150)
+        self.assertLess(len(result), len(line))
+        self.assertFalse(result.endswith("\n"))
+
+    def test_truncate_long_line_minified_js_like(self):
+        """Simulate a compiled JS line with thousands of characters."""
+        # Mimic a minified bundle line: var e={init:function(){...}}
+        body = "var e={init:function(){" + "a" * 4000 + "}};"
+        line = f"+{body}\n"
+        result = _truncate_long_line(line, _MAX_LINE_LENGTH)
+        self.assertLess(len(result), _MAX_LINE_LENGTH + 50)  # prefix + marker
+        self.assertTrue(result.startswith("+var e="))
+        self.assertIn("[truncated", result)
+        self.assertIn("}};", result)  # tail preserved
+
+    # -- truncate_large_diff_files: line-count truncation --
+
+    def _make_diff_with_n_lines(self, n: int, file_path="src/foo.py"):
+        """Build a unified diff for *file_path* with *n* content lines."""
+        header = (
+            f"diff --git a/{file_path} b/{file_path}\n"
+            "index 1234567..abcdefg 100644\n"
+            f"--- a/{file_path}\n"
+            f"+++ b/{file_path}\n"
+        )
+        content_lines = [f"@@ -1,{n} +1,{n} @@\n"]
+        for i in range(n - 1):
+            content_lines.append(f"+line {i}\n")
+        return header + "".join(content_lines)
+
+    def test_truncate_no_change_when_small(self):
+        """Files below threshold are left untouched."""
+        diff = self._make_diff_with_n_lines(10)
+        result = truncate_large_diff_files(diff, threshold=500, enabled=True)
+        self.assertEqual(result, diff)
+
+    def test_truncate_line_count(self):
+        """Files above threshold are truncated to head + tail."""
+        diff = self._make_diff_with_n_lines(600)
+        result = truncate_large_diff_files(
+            diff, threshold=100, keep_head=10, keep_tail=5, enabled=True
+        )
+        self.assertIn("TRUNCATED", result)
+        self.assertIn("585 lines", result)  # 600 - 10 - 5
+        self.assertIn("+line 0", result)
+        self.assertIn("+line 594", result)  # tail
+
+    def test_truncate_disabled(self):
+        """When enabled=False the diff is returned as-is."""
+        diff = self._make_diff_with_n_lines(600)
+        result = truncate_large_diff_files(diff, enabled=False)
+        self.assertEqual(result, diff)
+
+    def test_truncate_multiple_files(self):
+        """Each file is evaluated independently."""
+        big = self._make_diff_with_n_lines(300, "big.js")
+        small = self._make_diff_with_n_lines(10, "small.py")
+        diff = big + "\n" + small
+        result = truncate_large_diff_files(
+            diff, threshold=100, keep_head=5, keep_tail=5, enabled=True
+        )
+        # big.js should be truncated
+        self.assertIn("TRUNCATED", result)
+        # small.py should appear fully
+        self.assertIn("+line 9", result)
+
+    def test_truncate_empty_diff(self):
+        result = truncate_large_diff_files("", enabled=True)
+        self.assertEqual(result, "")
+
+    def test_truncate_no_diff_git_sections(self):
+        """Diff without any 'diff --git' markers is returned as-is."""
+        diff = "some random text without diff markers"
+        result = truncate_large_diff_files(diff, enabled=True)
+        self.assertEqual(result, diff)
+
+    # -- truncate_large_diff_files: line-length truncation --
+
+    def _make_diff_with_long_line(self, line_len: int, file_path="bundle.js"):
+        """Build a diff with a single very long content line."""
+        header = (
+            f"diff --git a/{file_path} b/{file_path}\n"
+            "index 1234567..abcdefg 100644\n"
+            f"--- a/{file_path}\n"
+            f"+++ b/{file_path}\n"
+        )
+        long_body = "x" * line_len
+        content = f"@@ -1,1 +1,1 @@\n+{long_body}\n"
+        return header + content
+
+    def test_truncate_long_line_in_diff(self):
+        """A single 3000-char line is shortened even though line count is 1."""
+        diff = self._make_diff_with_long_line(3000)
+        result = truncate_large_diff_files(
+            diff, threshold=500, max_line_length=_MAX_LINE_LENGTH, enabled=True
+        )
+        # The diff has only 2 content lines (@@ + one +line), well below
+        # threshold=500, so line-count truncation does NOT fire.
+        # But the 3000-char line should still be shortened.
+        self.assertNotIn("x" * 3000, result)
+        self.assertIn("[truncated", result)
+        # Verify @@ header is still intact for inject_line_numbers
+        self.assertIn("@@ -1,1 +1,1 @@", result)
+
+    def test_truncated_diff_composes_with_inject_line_numbers(self):
+        """Verify the full pipeline: truncate -> inject_line_numbers works."""
+        diff = self._make_diff_with_long_line(5000)
+        truncated = truncate_large_diff_files(
+            diff, threshold=500, max_line_length=_MAX_LINE_LENGTH, enabled=True
+        )
+        # This must not raise – @@ header must be preserved.
+        numbered = inject_line_numbers(truncated)
+        self.assertIn("   1 | ", numbered)
+        self.assertIn("[truncated", numbered)
+
+    def test_both_mechanisms_together(self):
+        """Many lines AND long lines → both truncations fire."""
+        # Build a diff with 600 lines, each 2000 chars long.
+        header = (
+            "diff --git a/bundle.js b/bundle.js\n"
+            "index 1234567..abcdefg 100644\n"
+            "--- a/bundle.js\n"
+            "+++ b/bundle.js\n"
+        )
+        long_body = "v" * 2000
+        content_lines = ["@@ -1,600 +1,600 @@\n"]
+        for i in range(599):
+            content_lines.append(f"+chunk_{i}_{long_body}\n")
+        diff = header + "".join(content_lines)
+
+        result = truncate_large_diff_files(
+            diff,
+            threshold=50,
+            keep_head=5,
+            keep_tail=5,
+            max_line_length=100,
+            enabled=True,
+        )
+        # Line-count truncation
+        self.assertIn("TRUNCATED", result)
+        # Line-length truncation (no raw 2000-char lines remain)
+        for line in result.splitlines():
+            self.assertLess(len(line), 200, f"Line too long: {line[:80]}...")
 
 
 if __name__ == "__main__":

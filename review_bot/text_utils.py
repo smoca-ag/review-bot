@@ -1,6 +1,13 @@
+import os
 import re
 
 _MAX_LINE_LENGTH = 150
+
+# Truncation settings – read from environment variables
+_TRUNCATE_ENABLED = os.getenv("TRUNCATE_LARGE_FILES", "true").lower() == "true"
+_TRUNCATE_THRESHOLD = int(os.getenv("TRUNCATE_FILE_THRESHOLD", "500"))
+_TRUNCATE_KEEP_HEAD = int(os.getenv("TRUNCATE_KEEP_HEAD_LINES", "100"))
+_TRUNCATE_KEEP_TAIL = int(os.getenv("TRUNCATE_KEEP_TAIL_LINES", "100"))
 
 
 def wrap_in_cdata(text: str) -> str:
@@ -89,6 +96,184 @@ def paginate_text(
 
 def is_binary(content: bytes) -> bool:
     return b"\x00" in content
+
+
+def _parse_diff_into_files(diff_text: str) -> list[tuple[list[str], list[str]]]:
+    """Parse a unified diff into a list of (file_header_lines, content_lines) tuples.
+
+    Each tuple contains:
+    - file_header_lines: the `diff --git`, `index`, `---`, `+++` lines
+    - content_lines: the `@@` hunk headers and diff content lines
+    """
+    files = []
+    lines = diff_text.splitlines(keepends=True)
+    i = 0
+    num_lines = len(lines)
+
+    while i < num_lines:
+        line = lines[i]
+        if line.startswith("diff --git"):
+            # Collect header lines until we hit a hunk marker
+            header = []
+            while i < num_lines:
+                if lines[i].startswith("@@ "):
+                    break
+                header.append(lines[i])
+                i += 1
+            # Collect content lines until the next file or end
+            content = []
+            while i < num_lines and not lines[i].startswith("diff --git"):
+                content.append(lines[i])
+                i += 1
+            if header:
+                files.append((header, content))
+        else:
+            # Lines before the first `diff --git` (e.g., GitLab diff preamble)
+            i += 1
+
+    return files
+
+
+def _truncate_long_line(line: str, max_length: int) -> str:
+    """Truncate a single diff line if it exceeds *max_length*.
+
+    Diff lines start with a prefix character (`+`, `-`, ` `, etc.).
+    The prefix is preserved; only the payload is shortened.
+
+    For diff content lines the result looks like::
+
+        +abc... [truncated 1500 chars] ...xyz
+
+    For hunk headers (`@@`) the line is left intact so that
+    ``inject_line_numbers`` can still parse line coordinates.
+    """
+    if len(line) <= max_length:
+        return line
+
+    # Strip the trailing newline for measurement; we re-add it later.
+    payload = line.rstrip("\n")
+    has_newline = line.endswith("\n")
+
+    # Everything after the first character is the "payload".
+    prefix = payload[0]
+    body = payload[1:]
+
+    # @@ hunk headers carry line-number metadata required by
+    # ``inject_line_numbers`` – never truncate them.
+    if prefix == "@":
+        return line
+
+    skipped = len(body) - (max_length - len(prefix) - 40)
+    if skipped < 0:
+        skipped = 0
+
+    # Keep a small head and tail of the body so the reviewer still sees
+    # the boundaries of the change (useful for minified JS).
+    keep_each = max(20, (max_length - len(prefix) - 40) // 2)
+    truncated_body = (
+        body[:keep_each] + f"... [truncated {skipped} chars] ..." + body[-keep_each:]
+    )
+
+    result = prefix + truncated_body
+    if has_newline:
+        result += "\n"
+    return result
+
+
+def truncate_large_diff_files(
+    diff_text: str,
+    threshold: int | None = None,
+    keep_head: int | None = None,
+    keep_tail: int | None = None,
+    max_line_length: int | None = None,
+    enabled: bool | None = None,
+) -> str:
+    """Truncate per-file sections of a unified diff that exceed *threshold* lines.
+
+    Two independent mechanisms are applied:
+
+    1. **Line-count truncation** -- files whose diff content (hunk headers +
+       diff lines) exceeds *threshold* are reduced to the first *keep_head*
+       lines and the last *keep_tail* lines, with a ``...`` marker in between.
+
+    2. **Line-length truncation** -- any individual diff line longer than
+       *max_line_length* is shortened in-place (head + ``[truncated N chars]`` +
+       tail).  Hunk headers (``@@``) are never touched so that downstream
+       line-number injection still works.
+
+    Parameters
+    ----------
+    diff_text:
+        A unified diff (e.g. from ``git diff`` or the GitLab API).
+    threshold:
+        Maximum number of content lines per file before line-count truncation
+        kicks in.  Defaults to ``TRUNCATE_FILE_THRESHOLD`` env var (500).
+    keep_head:
+        Number of leading content lines to preserve.  Defaults to
+        ``TRUNCATE_KEEP_HEAD_LINES`` env var (100).
+    keep_tail:
+        Number of trailing content lines to preserve.  Defaults to
+        ``TRUNCATE_KEEP_TAIL_LINES`` env var (100).
+    max_line_length:
+        Maximum length (characters) of any single diff line.  Defaults to
+        ``_MAX_LINE_LENGTH`` constant (150), shared with ``paginate_text``.
+    enabled:
+        Whether truncation is active.  Defaults to ``TRUNCATE_LARGE_FILES``
+        env var (``true``).
+
+    Returns the (possibly truncated) diff text.
+    """
+    if threshold is None:
+        threshold = _TRUNCATE_THRESHOLD
+    if keep_head is None:
+        keep_head = _TRUNCATE_KEEP_HEAD
+    if keep_tail is None:
+        keep_tail = _TRUNCATE_KEEP_TAIL
+    if max_line_length is None:
+        max_line_length = _MAX_LINE_LENGTH
+    if enabled is None:
+        enabled = _TRUNCATE_ENABLED
+
+    if not enabled:
+        return diff_text
+
+    files = _parse_diff_into_files(diff_text)
+    if not files:
+        return diff_text
+
+    result_parts = []
+    for header, content in files:
+        # Extract the file path from the +++ line for the truncation message
+        file_path = "unknown"
+        for hline in header:
+            if hline.startswith("+++ b/"):
+                file_path = hline[6:].rstrip()
+                break
+
+        # --- Step 1: line-length truncation (applied to every content line) ---
+        content = [_truncate_long_line(line, max_line_length) for line in content]
+
+        # --- Step 2: line-count truncation ---
+        if len(content) > threshold:
+            head = content[:keep_head]
+            tail = content[-keep_tail:] if keep_tail > 0 else []
+            skipped = len(content) - keep_head - len(tail)
+            if skipped < 0:
+                skipped = 0
+
+            truncation_marker = (
+                f"  ... [TRUNCATED {skipped} lines to save tokens. "
+                f"Total diff for {file_path} was {len(content)} lines.] ...\n"
+            )
+            result_parts.extend(header)
+            result_parts.extend(head)
+            result_parts.append(truncation_marker)
+            result_parts.extend(tail)
+        else:
+            result_parts.extend(header)
+            result_parts.extend(content)
+
+    return "".join(result_parts)
 
 
 def resolve_diff_coordinates(
