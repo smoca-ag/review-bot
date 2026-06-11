@@ -225,4 +225,6 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
                     )
                 return
         finally:
+            if chroma_client is not None:
+                chroma_client.close()
             mr_request.cleanup()
