@@ -32,15 +32,18 @@ class BaseBackend:
         try:
             output = subprocess.run(
                 ["podman", "exec", self.container_name, "ls", "-la", path],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 timeout=30,
+                check=True,
             )
             return output.stdout
         except subprocess.TimeoutExpired:
             return "Error: Command timed out after 30 seconds."
         except subprocess.CalledProcessError as e:
-            return f"Error listing files: {e.stdout.strip()}"
+            err_output = e.stdout.strip() if e.stdout else "(no output)"
+            return f"Error listing files: {err_output}"
 
     def scan_code(self, pattern: str, path: str = ".") -> str:
         """Scan the repository for a pattern using git grep inside the container."""
@@ -60,7 +63,8 @@ class BaseBackend:
                     pattern,
                     path,
                 ],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 timeout=30,
             )
@@ -70,7 +74,8 @@ class BaseBackend:
         except subprocess.CalledProcessError as e:
             if e.returncode == 1:
                 return "No matches found."
-            return f"Error scanning code: {e.stdout.strip()}"
+            err_output = e.stdout.strip() if e.stdout else "(no output)"
+            return f"Error scanning code: {err_output}"
 
     def execute_command(self, command: str, timeout: int = 60) -> str:
         """Execute a shell command inside the container"""
@@ -114,7 +119,8 @@ class BaseBackend:
                     "cat",
                     file_path,
                 ],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 timeout=30,
             )
@@ -122,7 +128,8 @@ class BaseBackend:
         except subprocess.TimeoutExpired:
             return "Error: Command timed out after 30 seconds."
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr
+            # stderr is merged into stdout, so error messages are in e.stdout
+            error_msg = e.stdout or ""
             if "No such file" in error_msg or "cannot access" in error_msg:
                 return None
             return f"Error reading file {file_path}: {error_msg.strip()}"
