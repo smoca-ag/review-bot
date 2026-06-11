@@ -1,6 +1,10 @@
+import json
+import os
+from datetime import datetime, timezone
+
 from pydantic_ai import RunContext, Tool
 
-from review_bot.models import ReviewDeps
+from review_bot.models import BotImprovementSuggestion, ReviewDeps
 from review_bot.text_utils import is_binary, paginate_text
 
 _MAX_FILE_LINES = 200
@@ -152,10 +156,66 @@ def vector_search(ctx: RunContext[ReviewDeps], query: str, top_k: int = 5) -> st
         return f"Error searching vector index: {str(e)}"
 
 
+def suggest_bot_improvement(
+    ctx: RunContext[ReviewDeps],
+    category: str,
+    description: str,
+    suggestion: str,
+    context: str,
+) -> str:
+    """
+    Suggest an improvement to the review bot itself.
+
+    Use this tool when you encounter a limitation that prevents you from
+    verifying a finding or performing your review effectively. This helps
+    the bot learn from its own limitations and improve over time.
+
+    Examples:
+    - Missing a tool: "I suspected a type error but could not verify it without mypy"
+    - Missing dependency: "I could not run the test suite because pytest is not installed"
+    - Missing capability: "I cannot verify database queries without a postgres client"
+    - Prompt improvement: "The prompt should instruct agents to check for X"
+
+    Args:
+        category: One of: missing_tool, missing_dependency, missing_capability, prompt_improvement, other.
+        description: What limitation was encountered during the review.
+        suggestion: Concrete suggestion to improve the bot (e.g., 'Install mypy in the container').
+        context: Context where the limitation was encountered (e.g., file path, code snippet, scenario).
+    """
+    try:
+        # Determine the log file path
+        log_dir = os.path.expanduser("~/.review-bot")
+        log_file = os.path.join(log_dir, "improvements.log")
+
+        # Create directory if it doesn't exist
+        os.makedirs(log_dir, exist_ok=True)
+
+        # Create the suggestion record
+        entry = BotImprovementSuggestion(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            agent_name=ctx.deps.mr_request.__class__.__name__
+            if hasattr(ctx.deps, "mr_request")
+            else "unknown",
+            category=category,
+            description=description,
+            suggestion=suggestion,
+            context=context,
+        )
+
+        # Append as JSON line
+        with open(log_file, "a") as f:
+            f.write(entry.model_dump_json() + "\n")
+
+        return f"Suggestion recorded: [{category}] {suggestion}"
+    except Exception as e:
+        return f"Error recording suggestion: {str(e)}"
+
+
 shared_tools = [
     Tool(fetch_file_content),
     Tool(list_files),
     Tool(scan_code),
     Tool(execute_command),
     Tool(vector_search),
+    Tool(suggest_bot_improvement),
 ]

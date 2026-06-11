@@ -45,6 +45,7 @@ SHARED_SUB_AGENT_SYSTEM_PROMPT = (
     "2. KNOWLEDGE CUTOFF: Do NOT flag package versions, deprecations, or API signatures as bugs unless you verify them via tools. Default to assuming external package usage is correct.\n"
     "3. STRUCTURE: Provide your analysis by cleanly populating the required schema fields directly. Do not stringify or wrap your arrays in markdown block strings.\n"
     "4. TOOL USAGE: You have full access to a sandboxed shell environment via the `execute_command` tool. Use it aggressively and freely to verify your assumptions. Run linters, type checkers, test suites, or simple python/node scripts to validate code correctness before reporting an issue.\n"
+    "5. SELF-IMPROVEMENT: If you encounter a limitation that prevents you from verifying a finding or performing your review (missing tool, missing dependency, unclear context), use the `suggest_bot_improvement` tool to report it. Be specific about what is missing and what would help.\n"
 )
 
 _agent_cache: dict = {}

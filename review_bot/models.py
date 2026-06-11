@@ -3,6 +3,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+
 @dataclass
 class ReviewDeps:
     mr_request: Any
@@ -66,6 +67,31 @@ class FinalReviewResult(BaseModel):
     )
     critical_line_comments: list[LineComment] = Field(
         description="Filtered list of ONLY high-confidence line comments."
+    )
+
+
+class BotImprovementSuggestion(BaseModel):
+    timestamp: str = Field(
+        description="ISO 8601 timestamp when the suggestion was made."
+    )
+    agent_name: str = Field(
+        description="Name of the agent that made the suggestion (e.g., 'security', 'logic')."
+    )
+    category: Literal[
+        "missing_tool",
+        "missing_dependency",
+        "missing_capability",
+        "prompt_improvement",
+        "other",
+    ] = Field(description="Category of the improvement suggestion.")
+    description: str = Field(
+        description="What limitation was encountered during the review."
+    )
+    suggestion: str = Field(
+        description="Concrete suggestion to improve the bot (e.g., 'Install mypy in the container')."
+    )
+    context: str = Field(
+        description="Context where the limitation was encountered (e.g., file path, code snippet, or scenario)."
     )
 
 
