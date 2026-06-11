@@ -73,7 +73,6 @@ def format_and_post_review(logger, mr_request, review_result: FinalReviewResult,
     logger.info("Markdown Output Generated:\n" + markdown_comment)
     if post:
         mr_request.post_review(markdown_comment)
-        mr_request.publish_reviews()
         logger.info("🎉 Review posted successfully!")
     else:
         logger.info("Review generated but not posted (--post not specified).")

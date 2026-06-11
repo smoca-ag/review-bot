@@ -183,9 +183,6 @@ class BaseBackend:
         if self.logger:
             self.logger.info(f"Started Podman container: {self.container_name}")
 
-    def publish_reviews(self) -> None:
-        pass
-
     def diff(self) -> str:
         return ""
 
