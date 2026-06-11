@@ -1,4 +1,8 @@
+import os
+
 from review_bot.models import FinalReviewResult
+
+_CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.9"))
 
 
 def format_and_post_review(logger, mr_request, review_result: FinalReviewResult, post):
@@ -61,7 +65,7 @@ def format_and_post_review(logger, mr_request, review_result: FinalReviewResult,
         )
         if (
             post
-            and comment.confidence_score >= 0.9
+            and comment.confidence_score >= _CONFIDENCE_THRESHOLD
             and comment.severity.upper() != "MINOR"
         ):
             mr_request.post_line_review(text, comment.file, comment.line)
