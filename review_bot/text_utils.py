@@ -229,7 +229,8 @@ def truncate_large_diff_files(
         content = [_truncate_long_line(line, max_line_length) for line in content]
 
         # --- Step 2: line-count truncation ---
-        if len(content) > threshold:
+        keep_head = max(10, max_lines // 10)
+        if len(content) > max_lines:
             head = content[:keep_head]
             skipped = len(content) - keep_head
 

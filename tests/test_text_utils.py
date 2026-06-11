@@ -376,24 +376,18 @@ class TestTruncation(unittest.TestCase):
     def test_truncate_no_change_when_small(self):
         """Files below threshold are left untouched."""
         diff = self._make_diff_with_n_lines(10)
-        result = truncate_large_diff_files(diff, threshold=500, enabled=True)
+        result = truncate_large_diff_files(diff, max_lines=500)
         self.assertEqual(result, diff)
 
     def test_truncate_line_count(self):
         """Files above threshold are truncated to head only."""
         diff = self._make_diff_with_n_lines(600)
         result = truncate_large_diff_files(
-            diff, threshold=100, keep_head=10, enabled=True
+            diff, max_lines=100
         )
         self.assertIn("TRUNCATED", result)
         self.assertIn("590 lines", result)  # 600 - 10
         self.assertIn("+line 0", result)
-
-    def test_truncate_disabled(self):
-        """When enabled=False the diff is returned as-is."""
-        diff = self._make_diff_with_n_lines(600)
-        result = truncate_large_diff_files(diff, enabled=False)
-        self.assertEqual(result, diff)
 
     def test_truncate_multiple_files(self):
         """Each file is evaluated independently."""
@@ -401,7 +395,7 @@ class TestTruncation(unittest.TestCase):
         small = self._make_diff_with_n_lines(10, "small.py")
         diff = big + "\n" + small
         result = truncate_large_diff_files(
-            diff, threshold=100, keep_head=5, enabled=True
+            diff, max_lines=100
         )
         # big.js should be truncated
         self.assertIn("TRUNCATED", result)
@@ -409,13 +403,13 @@ class TestTruncation(unittest.TestCase):
         self.assertIn("+line 8", result)
 
     def test_truncate_empty_diff(self):
-        result = truncate_large_diff_files("", enabled=True)
+        result = truncate_large_diff_files("")
         self.assertEqual(result, "")
 
     def test_truncate_no_diff_git_sections(self):
         """Diff without any 'diff --git' markers is returned as-is."""
         diff = "some random text without diff markers"
-        result = truncate_large_diff_files(diff, enabled=True)
+        result = truncate_large_diff_files(diff)
         self.assertEqual(result, diff)
 
     # -- truncate_large_diff_files: line-length truncation --
@@ -436,7 +430,7 @@ class TestTruncation(unittest.TestCase):
         """A single 3000-char line is shortened even though line count is 1."""
         diff = self._make_diff_with_long_line(3000)
         result = truncate_large_diff_files(
-            diff, threshold=500, max_line_length=_MAX_LINE_LENGTH, enabled=True
+            diff, max_lines=500, max_line_length=_MAX_LINE_LENGTH
         )
         # The diff has only 2 content lines (@@ + one +line), well below
         # threshold=500, so line-count truncation does NOT fire.
@@ -450,7 +444,7 @@ class TestTruncation(unittest.TestCase):
         """Verify the full pipeline: truncate -> inject_line_numbers works."""
         diff = self._make_diff_with_long_line(5000)
         truncated = truncate_large_diff_files(
-            diff, threshold=500, max_line_length=_MAX_LINE_LENGTH, enabled=True
+            diff, max_lines=500, max_line_length=_MAX_LINE_LENGTH
         )
         # This must not raise – @@ header must be preserved.
         numbered = inject_line_numbers(truncated)
@@ -474,10 +468,8 @@ class TestTruncation(unittest.TestCase):
 
         result = truncate_large_diff_files(
             diff,
-            threshold=50,
-            keep_head=5,
+            max_lines=50,
             max_line_length=100,
-            enabled=True,
         )
         # Line-count truncation
         self.assertIn("TRUNCATED", result)
