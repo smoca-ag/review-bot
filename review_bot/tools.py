@@ -1,4 +1,3 @@
-import json
 import os
 from datetime import datetime, timezone
 
@@ -7,14 +6,12 @@ from pydantic_ai import RunContext, Tool
 from review_bot.models import BotImprovementSuggestion, ReviewDeps
 from review_bot.text_utils import is_binary, paginate_text
 
-_MAX_FILE_LINES = 200
-
 
 def fetch_file_content(
     ctx: RunContext[ReviewDeps],
     file_path: str,
     start_line: int = 1,
-    max_lines: int = _MAX_FILE_LINES,
+    max_lines: int | None = None,
 ) -> str:
     """
     Fetch the contents of a specific file from the repository.
@@ -49,7 +46,7 @@ def list_files(
     ctx: RunContext[ReviewDeps],
     path: str = ".",
     start_line: int = 1,
-    max_lines: int = _MAX_FILE_LINES,
+    max_lines: int | None = None,
 ) -> str:
     """
     List files and directories at a specific path in the repository.
@@ -75,7 +72,7 @@ def scan_code(
     pattern: str,
     path: str = ".",
     start_line: int = 1,
-    max_lines: int = _MAX_FILE_LINES,
+    max_lines: int | None = None,
 ) -> str:
     """
     Search for a text pattern in the repository code.
@@ -101,7 +98,7 @@ async def execute_command(
     ctx: RunContext[ReviewDeps],
     command: str,
     start_line: int = 1,
-    max_lines: int = _MAX_FILE_LINES,
+    max_lines: int | None = None,
 ) -> str:
     """
     Execute a shell command in the repository context.

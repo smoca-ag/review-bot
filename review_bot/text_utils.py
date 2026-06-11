@@ -1,12 +1,8 @@
 import os
 import re
 
-_MAX_LINE_LENGTH = 150
-
-# Truncation settings – read from environment variables
-_TRUNCATE_ENABLED = os.getenv("TRUNCATE_LARGE_FILES", "true").lower() == "true"
-_TRUNCATE_THRESHOLD = int(os.getenv("TRUNCATE_FILE_THRESHOLD", "500"))
-_TRUNCATE_KEEP_HEAD = int(os.getenv("TRUNCATE_KEEP_HEAD_LINES", "100"))
+_MAX_LINE_LENGTH = int(os.getenv("MAX_LINE_LENGTH", "150"))
+_MAX_FILE_LINES = int(os.getenv("MAX_LINES", "200"))
 
 
 def wrap_in_cdata(text: str) -> str:
@@ -69,10 +65,11 @@ def chunk_text(
 def paginate_text(
     text: str,
     start_line: int,
-    max_lines: int,
+    max_lines: int | None,
     max_line_length: int = _MAX_LINE_LENGTH,
     add_line_numbers: bool = False,
 ) -> str:
+    max_lines = _MAX_FILE_LINES if max_lines is None else max_lines
     lines = text.splitlines()
     total = len(lines)
     start_idx = max(0, start_line - 1)
@@ -181,10 +178,8 @@ def _truncate_long_line(line: str, max_length: int) -> str:
 
 def truncate_large_diff_files(
     diff_text: str,
-    threshold: int | None = None,
-    keep_head: int | None = None,
+    max_lines: int | None = None,
     max_line_length: int | None = None,
-    enabled: bool | None = None,
 ) -> str:
     """Truncate per-file sections of a unified diff that exceed *threshold* lines.
 
@@ -203,32 +198,19 @@ def truncate_large_diff_files(
     ----------
     diff_text:
         A unified diff (e.g. from ``git diff`` or the GitLab API).
-    threshold:
+    max_lines:
         Maximum number of content lines per file before line-count truncation
         kicks in.  Defaults to ``TRUNCATE_FILE_THRESHOLD`` env var (500).
-    keep_head:
-        Number of leading content lines to preserve.  Defaults to
-        ``TRUNCATE_KEEP_HEAD_LINES`` env var (100).
     max_line_length:
         Maximum length (characters) of any single diff line.  Defaults to
         ``_MAX_LINE_LENGTH`` constant (150), shared with ``paginate_text``.
-    enabled:
-        Whether truncation is active.  Defaults to ``TRUNCATE_LARGE_FILES``
-        env var (``true``).
 
     Returns the (possibly truncated) diff text.
     """
-    if threshold is None:
-        threshold = _TRUNCATE_THRESHOLD
-    if keep_head is None:
-        keep_head = _TRUNCATE_KEEP_HEAD
     if max_line_length is None:
         max_line_length = _MAX_LINE_LENGTH
-    if enabled is None:
-        enabled = _TRUNCATE_ENABLED
-
-    if not enabled:
-        return diff_text
+    if max_lines is None:
+        max_lines = _MAX_FILE_LINES
 
     files = _parse_diff_into_files(diff_text)
     if not files:
