@@ -190,8 +190,9 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
 
             # Truncate large files in the diff to save tokens
             if diff_content:
+                original_diff = diff_content
                 diff_content = truncate_large_diff_files(diff_content)
-                if diff_content != (mr_request.diff() or ""):
+                if diff_content != original_diff:
                     logger.info("Applied diff truncation for large files.")
 
             mr_description = mr_request.description() or "No description provided."
