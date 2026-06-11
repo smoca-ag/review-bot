@@ -230,71 +230,52 @@ class Gitlab(BaseBackend):
         return self.get_json_response(url)
 
     def fetch_repository(self):
-        self.repo_dir = tempfile.mkdtemp()
-        repo_dir = self.repo_dir
+        repo_dir = tempfile.mkdtemp()
 
-        project = self.get_project()
-        if not project or "http_url_to_repo" not in project:
-            self.logger.error("Could not get project details for cloning.")
-            return
+        try:
+            project = self.get_project()
+            if not project or "http_url_to_repo" not in project:
+                self.logger.error("Could not get project details for cloning.")
+                return
 
-        # Keep the remote URL completely clean
-        clone_url = project["http_url_to_repo"]
+            # Keep the remote URL completely clean
+            clone_url = project["http_url_to_repo"]
 
-        # 1. Pass the token securely as an isolated environment variable
-        env = os.environ.copy()
-        env["GL_TOKEN"] = self.private_token
+            # 1. Pass the token securely as an isolated environment variable
+            env = os.environ.copy()
+            env["GL_TOKEN"] = self.private_token
 
-        # 2. Inject the custom credential helper via the Git environment block
-        # This allows both regular Git and Git LFS to access the token in-memory
-        env["GIT_CONFIG_COUNT"] = "1"
-        env["GIT_CONFIG_KEY_0"] = "credential.helper"
-        env["GIT_CONFIG_VALUE_0"] = (
-            '!f() { echo "username=oauth2"; echo "password=$GL_TOKEN"; }; f'
-        )
+            # 2. Inject the custom credential helper via the Git environment block
+            # This allows both regular Git and Git LFS to access the token in-memory
+            env["GIT_CONFIG_COUNT"] = "1"
+            env["GIT_CONFIG_KEY_0"] = "credential.helper"
+            env["GIT_CONFIG_VALUE_0"] = (
+                '!f() { echo "username=oauth2"; echo "password=$GL_TOKEN"; }; f'
+            )
 
-        with tracer.start_as_current_span("project_checkout") as span:
-            span.set_attribute("gitlab.project_id", self.project_id)
-            span.set_attribute("gitlab.merge_request_iid", self.merge_request_iid)
-            span.set_attribute("gitlab.repo_dir", repo_dir)
+            with tracer.start_as_current_span("project_checkout") as span:
+                span.set_attribute("gitlab.project_id", self.project_id)
+                span.set_attribute("gitlab.merge_request_iid", self.merge_request_iid)
+                span.set_attribute("gitlab.repo_dir", repo_dir)
 
-            try:
-                subprocess.run(
-                    ["git", "init", repo_dir],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
-                subprocess.run(
-                    ["git", "remote", "add", "origin", clone_url],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    cwd=repo_dir,
-                )
+                try:
+                    subprocess.run(
+                        ["git", "init", repo_dir],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                    )
+                    subprocess.run(
+                        ["git", "remote", "add", "origin", clone_url],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        cwd=repo_dir,
+                    )
 
-                # 3. Pass the custom env dictionary to network operations
-                subprocess.run(
-                    [
-                        "git",
-                        "fetch",
-                        "--depth",
-                        "1",
-                        "origin",
-                        f"refs/merge-requests/{self.merge_request_iid}/head:mr-head",
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                    cwd=repo_dir,
-                    env=env,  # Git reads the auth helper here
-                )
-
-                target_branch = self.mr.get("target_branch") if self.mr else None
-                if target_branch:
+                    # 3. Pass the custom env dictionary to network operations
                     subprocess.run(
                         [
                             "git",
@@ -302,7 +283,7 @@ class Gitlab(BaseBackend):
                             "--depth",
                             "1",
                             "origin",
-                            f"refs/heads/{target_branch}:target-branch",
+                            f"refs/merge-requests/{self.merge_request_iid}/head:mr-head",
                         ],
                         check=True,
                         capture_output=True,
@@ -312,23 +293,52 @@ class Gitlab(BaseBackend):
                         env=env,  # Git reads the auth helper here
                     )
 
-                # 4. CRITICAL FOR LFS: Pass the env to checkout!
-                # This is when Git LFS executes the smudge filter to download large files.
-                subprocess.run(
-                    ["git", "checkout", "mr-head"],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,  # Bumped timeout slightly; LFS downloads take longer
-                    cwd=repo_dir,
-                    env=env,  # <--- Git LFS hooks read the auth helper right here
-                )
-            except subprocess.TimeoutExpired as e:
-                self.logger.error(f"Git operation timed out: {e}")
-                raise RuntimeError(f"Git operation timed out: {e}") from e
-            except subprocess.CalledProcessError as e:
-                self.logger.error(f"Git operation failed: {e.stderr}")
-                raise RuntimeError(f"Git operation failed: {e.stderr}") from e
+                    target_branch = self.mr.get("target_branch") if self.mr else None
+                    if target_branch:
+                        subprocess.run(
+                            [
+                                "git",
+                                "fetch",
+                                "--depth",
+                                "1",
+                                "origin",
+                                f"refs/heads/{target_branch}:target-branch",
+                            ],
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                            timeout=120,
+                            cwd=repo_dir,
+                            env=env,  # Git reads the auth helper here
+                        )
+
+                    # 4. CRITICAL FOR LFS: Pass the env to checkout!
+                    # This is when Git LFS executes the smudge filter to download large files.
+                    subprocess.run(
+                        ["git", "checkout", "mr-head"],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=120,  # Bumped timeout slightly; LFS downloads take longer
+                        cwd=repo_dir,
+                        env=env,  # <--- Git LFS hooks read the auth helper right here
+                    )
+                except subprocess.TimeoutExpired as e:
+                    self.logger.error(f"Git operation timed out: {e}")
+                    raise RuntimeError(f"Git operation timed out: {e}") from e
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Git operation failed: {e.stderr}")
+                    raise RuntimeError(f"Git operation failed: {e.stderr}") from e
+
+            # Only assign repo_dir after all git operations succeed
+            self.repo_dir = repo_dir
+        except Exception:
+            # Clean up temp directory on failure
+            try:
+                shutil.rmtree(repo_dir)
+            except Exception as e:
+                self.logger.error(f"Failed to clean up temp repo directory: {e}")
+            raise
 
     def cleanup(self):
         if self.repo_dir:
