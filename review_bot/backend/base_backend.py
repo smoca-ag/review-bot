@@ -90,9 +90,9 @@ class BaseBackend:
         except subprocess.TimeoutExpired:
             return f"Error: Command timed out after {timeout} seconds."
         except subprocess.CalledProcessError as e:
-            return (
-                f"Command failed with exit code {e.returncode}:\n{e.stdout}\n{e.stderr}"
-            )
+            # stderr is merged into stdout (stderr=subprocess.STDOUT), so e.stderr is empty
+            output = e.stdout if e.stdout else "(no output)"
+            return f"Command failed with exit code {e.returncode}:\n{output}"
         except ValueError:
             return "Error: Failed to parse command."
 
