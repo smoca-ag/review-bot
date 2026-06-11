@@ -380,15 +380,14 @@ class TestTruncation(unittest.TestCase):
         self.assertEqual(result, diff)
 
     def test_truncate_line_count(self):
-        """Files above threshold are truncated to head + tail."""
+        """Files above threshold are truncated to head only."""
         diff = self._make_diff_with_n_lines(600)
         result = truncate_large_diff_files(
-            diff, threshold=100, keep_head=10, keep_tail=5, enabled=True
+            diff, threshold=100, keep_head=10, enabled=True
         )
         self.assertIn("TRUNCATED", result)
-        self.assertIn("585 lines", result)  # 600 - 10 - 5
+        self.assertIn("590 lines", result)  # 600 - 10
         self.assertIn("+line 0", result)
-        self.assertIn("+line 594", result)  # tail
 
     def test_truncate_disabled(self):
         """When enabled=False the diff is returned as-is."""
@@ -402,12 +401,12 @@ class TestTruncation(unittest.TestCase):
         small = self._make_diff_with_n_lines(10, "small.py")
         diff = big + "\n" + small
         result = truncate_large_diff_files(
-            diff, threshold=100, keep_head=5, keep_tail=5, enabled=True
+            diff, threshold=100, keep_head=5, enabled=True
         )
         # big.js should be truncated
         self.assertIn("TRUNCATED", result)
-        # small.py should appear fully
-        self.assertIn("+line 9", result)
+        # small.py should appear fully (10 content lines = @@ header + lines 0-8)
+        self.assertIn("+line 8", result)
 
     def test_truncate_empty_diff(self):
         result = truncate_large_diff_files("", enabled=True)
@@ -477,7 +476,6 @@ class TestTruncation(unittest.TestCase):
             diff,
             threshold=50,
             keep_head=5,
-            keep_tail=5,
             max_line_length=100,
             enabled=True,
         )

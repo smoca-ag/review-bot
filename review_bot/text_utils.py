@@ -7,7 +7,6 @@ _MAX_LINE_LENGTH = 150
 _TRUNCATE_ENABLED = os.getenv("TRUNCATE_LARGE_FILES", "true").lower() == "true"
 _TRUNCATE_THRESHOLD = int(os.getenv("TRUNCATE_FILE_THRESHOLD", "500"))
 _TRUNCATE_KEEP_HEAD = int(os.getenv("TRUNCATE_KEEP_HEAD_LINES", "100"))
-_TRUNCATE_KEEP_TAIL = int(os.getenv("TRUNCATE_KEEP_TAIL_LINES", "100"))
 
 
 def wrap_in_cdata(text: str) -> str:
@@ -184,7 +183,6 @@ def truncate_large_diff_files(
     diff_text: str,
     threshold: int | None = None,
     keep_head: int | None = None,
-    keep_tail: int | None = None,
     max_line_length: int | None = None,
     enabled: bool | None = None,
 ) -> str:
@@ -194,7 +192,7 @@ def truncate_large_diff_files(
 
     1. **Line-count truncation** -- files whose diff content (hunk headers +
        diff lines) exceeds *threshold* are reduced to the first *keep_head*
-       lines and the last *keep_tail* lines, with a ``...`` marker in between.
+       lines, with a ``...`` marker indicating how many lines were skipped.
 
     2. **Line-length truncation** -- any individual diff line longer than
        *max_line_length* is shortened in-place (head + ``[truncated N chars]`` +
@@ -211,9 +209,6 @@ def truncate_large_diff_files(
     keep_head:
         Number of leading content lines to preserve.  Defaults to
         ``TRUNCATE_KEEP_HEAD_LINES`` env var (100).
-    keep_tail:
-        Number of trailing content lines to preserve.  Defaults to
-        ``TRUNCATE_KEEP_TAIL_LINES`` env var (100).
     max_line_length:
         Maximum length (characters) of any single diff line.  Defaults to
         ``_MAX_LINE_LENGTH`` constant (150), shared with ``paginate_text``.
@@ -227,8 +222,6 @@ def truncate_large_diff_files(
         threshold = _TRUNCATE_THRESHOLD
     if keep_head is None:
         keep_head = _TRUNCATE_KEEP_HEAD
-    if keep_tail is None:
-        keep_tail = _TRUNCATE_KEEP_TAIL
     if max_line_length is None:
         max_line_length = _MAX_LINE_LENGTH
     if enabled is None:
@@ -256,10 +249,7 @@ def truncate_large_diff_files(
         # --- Step 2: line-count truncation ---
         if len(content) > threshold:
             head = content[:keep_head]
-            tail = content[-keep_tail:] if keep_tail > 0 else []
-            skipped = len(content) - keep_head - len(tail)
-            if skipped < 0:
-                skipped = 0
+            skipped = len(content) - keep_head
 
             truncation_marker = (
                 f"  ... [TRUNCATED {skipped} lines to save tokens. "
@@ -268,7 +258,6 @@ def truncate_large_diff_files(
             result_parts.extend(header)
             result_parts.extend(head)
             result_parts.append(truncation_marker)
-            result_parts.extend(tail)
         else:
             result_parts.extend(header)
             result_parts.extend(content)
