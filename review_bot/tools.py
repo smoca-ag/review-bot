@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pydantic_ai import RunContext, Tool
 
 from review_bot.models import BotImprovementSuggestion, ReviewDeps
-from review_bot.text_utils import is_binary, paginate_text
+from review_bot.text_utils import paginate_text
 
 
 def fetch_file_content(
@@ -28,16 +28,7 @@ def fetch_file_content(
         raw = ctx.deps.mr_request.get_file_raw(file_path)
         if raw is None:
             return f"Error: File '{file_path}' not found."
-        if isinstance(raw, bytes):
-            if is_binary(raw):
-                return f"Binary file '{file_path}' ({len(raw)} bytes). Cannot display binary content."
-            try:
-                text = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                return f"Error: File '{file_path}' appears to be non-UTF-8 encoded."
-        else:
-            text = raw
-        return paginate_text(text, start_line, max_lines, add_line_numbers=True)
+        return paginate_text(raw, start_line, max_lines, add_line_numbers=True)
     except Exception as e:
         return f"Error fetching file: {str(e)}"
 
