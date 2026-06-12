@@ -1,5 +1,6 @@
 import os
 import re
+from dataclasses import dataclass, field
 
 _MAX_LINE_LENGTH = int(os.getenv("MAX_LINE_LENGTH", "150"))
 _MAX_FILE_LINES = int(os.getenv("MAX_LINES", "200"))
@@ -94,7 +95,40 @@ def is_binary(content: bytes) -> bool:
     return b"\x00" in content
 
 
-def _parse_diff_into_files(diff_text: str) -> list[tuple[list[str], list[str]]]:
+@dataclass
+class DiffHunk:
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+    header: str
+    lines: list[str] = field(default_factory=list)
+
+
+_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+def extract_hunks(file_content_lines: list[str]) -> list[DiffHunk]:
+    hunks: list[DiffHunk] = []
+    current: DiffHunk | None = None
+    for line in file_content_lines:
+        stripped = line.rstrip("\n")
+        m = _HUNK_RE.match(stripped)
+        if m:
+            current = DiffHunk(
+                old_start=int(m.group(1)),
+                old_count=int(m.group(2) or 1),
+                new_start=int(m.group(3)),
+                new_count=int(m.group(4) or 1),
+                header=stripped,
+            )
+            hunks.append(current)
+        elif current is not None:
+            current.lines.append(stripped)
+    return hunks
+
+
+def parse_diff_into_files(diff_text: str) -> list[tuple[list[str], list[str]]]:
     """Parse a unified diff into a list of (file_header_lines, content_lines) tuples.
 
     Each tuple contains:
@@ -212,7 +246,7 @@ def truncate_large_diff_files(
     if max_lines is None:
         max_lines = _MAX_FILE_LINES
 
-    files = _parse_diff_into_files(diff_text)
+    files = parse_diff_into_files(diff_text)
     if not files:
         return diff_text
 

@@ -4,9 +4,11 @@ from review_bot.text_utils import (
     _MAX_LINE_LENGTH,
     _truncate_long_line,
     chunk_text,
+    extract_hunks,
     inject_line_numbers,
     is_binary,
     paginate_text,
+    parse_diff_into_files,
     resolve_diff_coordinates,
     truncate_large_diff_files,
     wrap_in_cdata,
@@ -476,6 +478,99 @@ class TestTruncation(unittest.TestCase):
         # Line-length truncation (no raw 2000-char lines remain)
         for line in result.splitlines():
             self.assertLess(len(line), 200, f"Line too long: {line[:80]}...")
+
+
+class TestParseDiffIntoFiles(unittest.TestCase):
+    def test_single_file(self):
+        diff = (
+            "diff --git a/foo.py b/foo.py\n"
+            "index abc..def 100644\n"
+            "--- a/foo.py\n"
+            "+++ b/foo.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            " line1\n"
+            "+line2\n"
+            " line3\n"
+        )
+        files = parse_diff_into_files(diff)
+        self.assertEqual(len(files), 1)
+        header, content = files[0]
+        self.assertTrue(header[0].startswith("diff --git"))
+        self.assertTrue(any(h.startswith("+++ b/") for h in header))
+        self.assertTrue(any(l.startswith("@@") for l in content))
+
+    def test_multiple_files(self):
+        diff = (
+            "diff --git a/a.py b/a.py\n"
+            "index abc..def 100644\n"
+            "--- a/a.py\n"
+            "+++ b/a.py\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+            "diff --git a/b.py b/b.py\n"
+            "index abc..def 100644\n"
+            "--- a/b.py\n"
+            "+++ b/b.py\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+        files = parse_diff_into_files(diff)
+        self.assertEqual(len(files), 2)
+
+    def test_empty_diff(self):
+        self.assertEqual(parse_diff_into_files(""), [])
+
+    def test_preamble_ignored(self):
+        diff = "some preamble\nother stuff\ndiff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-old\n+new\n"
+        files = parse_diff_into_files(diff)
+        self.assertEqual(len(files), 1)
+
+
+class TestExtractHunks(unittest.TestCase):
+    def test_single_hunk(self):
+        content = [
+            "@@ -1,3 +1,4 @@\n",
+            " line1\n",
+            "+line2\n",
+            " line3\n",
+        ]
+        hunks = extract_hunks(content)
+        self.assertEqual(len(hunks), 1)
+        self.assertEqual(hunks[0].old_start, 1)
+        self.assertEqual(hunks[0].old_count, 3)
+        self.assertEqual(hunks[0].new_start, 1)
+        self.assertEqual(hunks[0].new_count, 4)
+        self.assertEqual(len(hunks[0].lines), 3)
+
+    def test_multiple_hunks(self):
+        content = [
+            "@@ -1,3 +1,3 @@\n",
+            " a\n",
+            "-b\n",
+            "+c\n",
+            "@@ -10,2 +10,2 @@\n",
+            " d\n",
+            "-e\n",
+            "+f\n",
+        ]
+        hunks = extract_hunks(content)
+        self.assertEqual(len(hunks), 2)
+        self.assertEqual(hunks[0].new_start, 1)
+        self.assertEqual(hunks[1].new_start, 10)
+
+    def test_no_hunk_headers(self):
+        content = [" some line\n", "+another\n"]
+        hunks = extract_hunks(content)
+        self.assertEqual(len(hunks), 0)
+
+    def test_no_count_defaults_to_1(self):
+        content = ["@@ -5 +5 @@\n", " ctx\n"]
+        hunks = extract_hunks(content)
+        self.assertEqual(len(hunks), 1)
+        self.assertEqual(hunks[0].old_count, 1)
+        self.assertEqual(hunks[0].new_count, 1)
 
 
 if __name__ == "__main__":
