@@ -31,7 +31,18 @@ class BaseBackend:
 
         try:
             cmd = (
-                ["podman", "exec", self.container_name, "find", path, "-type", "f", "-o", "-type", "d"]
+                [
+                    "podman",
+                    "exec",
+                    self.container_name,
+                    "find",
+                    path,
+                    "-type",
+                    "f",
+                    "-o",
+                    "-type",
+                    "d",
+                ]
                 if recursive
                 else ["podman", "exec", self.container_name, "ls", "-1a", path]
             )
@@ -89,7 +100,7 @@ class BaseBackend:
 
         try:
             output = subprocess.run(
-                ["podman", "exec", self.container_name, "/bin/sh", "-c", command],
+                ["podman", "exec", self.container_name, "/bin/bash", "-c", command],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,

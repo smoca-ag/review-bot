@@ -15,6 +15,8 @@ from review_bot.dependency_graph import (
     _detect_language,
     _extract_kotlin_definitions,
     _extract_kotlin_imports,
+    _extract_python_definitions,
+    _extract_python_imports,
     _extract_ruby_definitions,
     _extract_ruby_imports,
     _extract_swift_definitions,
@@ -23,6 +25,7 @@ from review_bot.dependency_graph import (
     _extract_ts_imports,
     _get_language_configs,
     _resolve_kotlin_import,
+    _resolve_python_import,
     _resolve_ruby_import,
     _resolve_swift_import,
     _resolve_ts_import,
@@ -252,6 +255,92 @@ class TestSwiftResolution(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class TestPythonParsing(unittest.TestCase):
+    def setUp(self):
+        cfg = _get_language_configs()["python"]
+        self.lang = ts.Language(cfg.language_fn())
+
+    def test_extract_imports(self):
+        source = b"""import os
+import sys
+from collections import defaultdict
+from typing import Optional, List
+from .utils import helper
+from ..base import BaseClass
+import foo.bar.baz
+"""
+        imports = _extract_python_imports(source, self.lang)
+        raws = [i.raw for i in imports]
+        self.assertIn("os", raws)
+        self.assertIn("sys", raws)
+        self.assertIn("collections", raws)
+        self.assertIn("typing", raws)
+        self.assertIn(".utils", raws)
+        self.assertIn("..base", raws)
+        self.assertIn("foo.bar.baz", raws)
+        self.assertEqual(len(imports), 7)
+
+    def test_extract_definitions(self):
+        source = b"""class AuthService:
+    def login(self, username, password):
+        pass
+
+def helper():
+    pass
+
+class User:
+    pass
+"""
+        defs = _extract_python_definitions(source, self.lang)
+        self.assertIn("AuthService", defs)
+        self.assertIn("helper", defs)
+        self.assertIn("User", defs)
+        self.assertIn("login", defs)
+        self.assertEqual(len(defs), 4)
+
+    def test_no_imports(self):
+        source = b"print('hello')\n"
+        self.assertEqual(_extract_python_imports(source, self.lang), [])
+
+    def test_broken_syntax(self):
+        source = b"import os\nclass Foo\n  def bar(:\n"
+        imports = _extract_python_imports(source, self.lang)
+        self.assertEqual(len(imports), 1)
+        self.assertEqual(imports[0].raw, "os")
+
+
+class TestPythonResolution(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.tmpdir, "pkg"))
+        with open(os.path.join(self.tmpdir, "pkg", "__init__.py"), "w") as f:
+            f.write("VERSION = '1.0'\n")
+        with open(os.path.join(self.tmpdir, "pkg", "utils.py"), "w") as f:
+            f.write("def helper(): pass\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def test_resolve_dotted_module(self):
+        result = _resolve_python_import("pkg.utils", "app.py", self.tmpdir)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.endswith("utils.py"))
+
+    def test_resolve_package_init(self):
+        result = _resolve_python_import("pkg", "app.py", self.tmpdir)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.endswith("__init__.py"))
+
+    def test_resolve_relative_from_package(self):
+        result = _resolve_python_import("pkg.utils", "pkg/__init__.py", self.tmpdir)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.endswith("utils.py"))
+
+    def test_unresolvable_import(self):
+        result = _resolve_python_import("nonexistent.module", "app.py", self.tmpdir)
+        self.assertIsNone(result)
+
+
 class TestKotlinParsing(unittest.TestCase):
     def setUp(self):
         cfg = _get_language_configs()["kotlin"]
@@ -341,6 +430,12 @@ class TestBuildDependencyGraph(unittest.TestCase):
         with open(os.path.join(self.tmpdir, "Sources", "Network", "Client.swift"), "w") as f:
             f.write("class NetworkClient {}\n")
 
+        os.makedirs(os.path.join(self.tmpdir, "mylib"))
+        with open(os.path.join(self.tmpdir, "mylib", "__init__.py"), "w") as f:
+            f.write("VERSION = '1.0'\n")
+        with open(os.path.join(self.tmpdir, "mylib", "core.py"), "w") as f:
+            f.write("from mylib import VERSION\nclass Core: pass\n")
+
     def tearDown(self):
         shutil.rmtree(self.tmpdir)
 
@@ -383,6 +478,19 @@ class TestBuildDependencyGraph(unittest.TestCase):
         raws = [i.raw for i in main_mod.imports]
         self.assertIn("Network", raws)
 
+    def test_python_imports_extracted(self):
+        graph = build_dependency_graph(self.tmpdir)
+        core_mod = graph.modules.get(os.path.join("mylib", "core.py"))
+        self.assertIsNotNone(core_mod)
+        raws = [i.raw for i in core_mod.imports]
+        self.assertIn("mylib", raws)
+
+    def test_python_dependents_index(self):
+        graph = build_dependency_graph(self.tmpdir)
+        init_path = os.path.join("mylib", "__init__.py")
+        deps = graph.dependents.get(init_path, set())
+        self.assertIn(os.path.join("mylib", "core.py"), deps)
+
 
 class TestDetectLanguage(unittest.TestCase):
     def test_ts(self):
@@ -399,6 +507,9 @@ class TestDetectLanguage(unittest.TestCase):
 
     def test_kotlin(self):
         self.assertEqual(_detect_language("App.kt"), "kotlin")
+
+    def test_python(self):
+        self.assertEqual(_detect_language("app.py"), "python")
 
     def test_unknown(self):
         self.assertIsNone(_detect_language("data.json"))

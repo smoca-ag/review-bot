@@ -325,6 +325,73 @@ def _resolve_kotlin_import(raw: str, source_file: str, repo_dir: str) -> str | N
     return None
 
 
+# --- Python ---
+
+def _extract_python_imports(source: bytes, lang: ts.Language) -> list[ImportRef]:
+    tree = _parse(source, lang)
+    imports: list[ImportRef] = []
+    for child in tree.root_node.children:
+        if child.type == "import_statement":
+            for sub in child.children:
+                if sub.type == "dotted_name":
+                    raw = source[sub.start_byte:sub.end_byte].decode()
+                    imports.append(ImportRef(raw=raw))
+                    break
+        elif child.type == "import_from_statement":
+            for sub in child.children:
+                if sub.type == "relative_import":
+                    raw = source[sub.start_byte:sub.end_byte].decode()
+                    imports.append(ImportRef(raw=raw))
+                    break
+            else:
+                for sub in child.children:
+                    if sub.type == "dotted_name":
+                        raw = source[sub.start_byte:sub.end_byte].decode()
+                        imports.append(ImportRef(raw=raw))
+                        break
+    return imports
+
+
+def _extract_python_definitions(source: bytes, lang: ts.Language) -> list[str]:
+    tree = _parse(source, lang)
+    defs: list[str] = []
+
+    def _walk(node: ts.Node, depth: int = 0) -> None:
+        if depth > 6:
+            return
+        if node.type in ("class_definition", "function_definition"):
+            for sub in node.children:
+                if sub.type == "identifier":
+                    defs.append(source[sub.start_byte:sub.end_byte].decode())
+                    break
+        for child in node.children:
+            _walk(child, depth + 1)
+
+    _walk(tree.root_node)
+    return defs
+
+
+def _resolve_python_import(raw: str, source_file: str, repo_dir: str) -> str | None:
+    path = raw.replace(".", "/")
+    source_dir = os.path.dirname(source_file)
+
+    candidates: list[str] = []
+    candidates.extend([
+        os.path.join(repo_dir, source_dir, path + ".py"),
+        os.path.join(repo_dir, source_dir, path, "__init__.py"),
+    ])
+    candidates.extend([
+        os.path.join(repo_dir, path + ".py"),
+        os.path.join(repo_dir, path, "__init__.py"),
+    ])
+
+    for c in candidates:
+        full = os.path.normpath(c)
+        if os.path.isfile(full):
+            return os.path.relpath(full, repo_dir)
+    return None
+
+
 # --- Language registry ---
 
 def _build_language_configs() -> dict[str, LanguageConfig]:
@@ -332,6 +399,7 @@ def _build_language_configs() -> dict[str, LanguageConfig]:
     import tree_sitter_ruby as ts_rb
     import tree_sitter_swift as ts_sw
     import tree_sitter_kotlin as ts_kt
+    import tree_sitter_python as ts_py
 
     configs: dict[str, LanguageConfig] = {}
 
@@ -369,6 +437,13 @@ def _build_language_configs() -> dict[str, LanguageConfig]:
         extract_imports=_extract_kotlin_imports,
         extract_definitions=_extract_kotlin_definitions,
         resolve_import=_resolve_kotlin_import,
+    )
+    configs["python"] = LanguageConfig(
+        extensions={".py"},
+        language_fn=ts_py.language,
+        extract_imports=_extract_python_imports,
+        extract_definitions=_extract_python_definitions,
+        resolve_import=_resolve_python_import,
     )
     return configs
 
