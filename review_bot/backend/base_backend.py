@@ -146,20 +146,13 @@ class BaseBackend:
                 self.logger.error("No repository directory to mount.")
             return
 
-        # Check if the image exists, build if not
-        img_check = subprocess.run(["podman", "image", "exists", image])
-        if img_check.returncode != 0:
-            if self.logger:
-                self.logger.info(
-                    f"Image {image} not found. Building it now... (This may take a while)"
-                )
-            project_root = os.path.abspath(
-                os.path.join(os.path.dirname(__file__), "..", "..")
-            )
-            build_dir = os.path.join(project_root, "review-container")
-            build_result = subprocess.run(["podman", "build", "-t", image, build_dir])
-            if build_result.returncode != 0:
-                raise RuntimeError("Failed to build the review-container image.")
+        project_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..")
+        )
+        build_dir = os.path.join(project_root, "review-container")
+        build_result = subprocess.run(["podman", "build", "-t", image, build_dir])
+        if build_result.returncode != 0:
+            raise RuntimeError("Failed to build the review-container image.")
 
         self.container_name = f"review-bot-{uuid.uuid4().hex[:8]}"
         abs_repo_dir = os.path.abspath(self.repo_dir)
