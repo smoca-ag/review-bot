@@ -36,6 +36,7 @@ def fetch_file_content(
 def list_files(
     ctx: RunContext[ReviewDeps],
     path: str = ".",
+    recursive: bool = False,
     start_line: int = 1,
     max_lines: int | None = None,
 ) -> str:
@@ -46,11 +47,12 @@ def list_files(
 
     Args:
         path: The directory path to list files for (defaults to root ".").
+        recursive: If True, list all files recursively under the path.
         start_line: The line number to start reading from for pagination.
         max_lines: The maximum number of lines to return.
     """
     try:
-        raw = ctx.deps.mr_request.list_files(path)
+        raw = ctx.deps.mr_request.list_files(path, recursive=recursive)
         if raw.startswith("Error"):
             return raw
         return paginate_text(raw, start_line, max_lines)

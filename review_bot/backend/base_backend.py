@@ -24,14 +24,19 @@ class BaseBackend:
         """Returns True if the merge request is a draft/WIP."""
         return False
 
-    def list_files(self, path: str = ".") -> str:
+    def list_files(self, path: str = ".", recursive: bool = False) -> str:
         """List files in the repository at the given path inside the container."""
         if not self.container_name:
             return "Error: No active container found."
 
         try:
+            cmd = (
+                ["podman", "exec", self.container_name, "find", path, "-type", "f", "-o", "-type", "d"]
+                if recursive
+                else ["podman", "exec", self.container_name, "ls", "-1a", path]
+            )
             output = subprocess.run(
-                ["podman", "exec", self.container_name, "ls", "-la", path],
+                cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
