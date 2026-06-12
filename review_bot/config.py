@@ -4,6 +4,24 @@ from dotenv import load_dotenv
 
 from review_bot.telemetry import setup_telemetry
 
+SOURCE_EXTENSIONS: frozenset[str] = frozenset({
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java",
+    ".c", ".cpp", ".h", ".hpp", ".rb", ".php", ".swift", ".kt",
+    ".kts", ".scala", ".sh",
+})
+
+INDEX_EXTENSIONS: frozenset[str] = SOURCE_EXTENSIONS | frozenset({
+    ".yaml", ".yml", ".toml", ".json", ".md",
+})
+
+EXCLUDE_DIRS: frozenset[str] = frozenset({
+    ".git", "__pycache__", "node_modules", "venv", "env",
+    ".venv", "dist", "build", ".gradle", ".idea", ".swiftpm",
+    "Pods", "vendor",
+})
+
+EXCLUDE_DOT_DIRS: bool = True
+
 
 def _get_model() -> str:
     model_name = os.getenv("ANTHROPIC_DEFAULT_OPUS_MODEL") or os.getenv(

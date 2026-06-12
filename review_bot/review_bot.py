@@ -13,6 +13,7 @@ from review_bot.agents import SUB_AGENTS, critic_agent_def
 
 # Refactored module imports
 from review_bot.config import ensure_setup, resolve_model
+from review_bot.dependency_graph import build_dependency_graph
 from review_bot.formatter import format_and_post_review
 from review_bot.models import FinalReviewResult, ReviewDeps
 from review_bot.rag import build_vector_index
@@ -96,6 +97,7 @@ async def async_review_process(
     secure_base_prompt,
     post,
     vector_index,
+    dep_graph=None,
 ):
     """Executes the sub-agents in sequence (to keep the prefix cache), then runs the critic."""
     tracer = trace.get_tracer(__name__)
@@ -104,6 +106,7 @@ async def async_review_process(
             mr_request=mr_request,
             mr_description=mr_description,
             vector_index=vector_index,
+            dependency_graph=dep_graph,
         )
 
         agents = _get_agents()
@@ -186,6 +189,19 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
                 logger.warning(f"Failed to build vector index: {e}.")
                 rag_span.set_attribute("rag.error", str(e))
 
+        dep_graph = None
+        with tracer.start_as_current_span("dependency_graph_build"):
+            try:
+                if mr_request.repo_dir:
+                    dep_graph = build_dependency_graph(mr_request.repo_dir)
+                    mod_count = len(dep_graph.modules)
+                    imp_count = sum(len(m.imports) for m in dep_graph.modules.values())
+                    logger.info(
+                        f"Built dependency graph: {mod_count} modules, {imp_count} imports."
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to build dependency graph: {e}.")
+
         try:
             diff_content = mr_request.diff() or ""
 
@@ -217,6 +233,7 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
                     secure_base_prompt,
                     post,
                     vector_index,
+                    dep_graph,
                 )
             except Exception as e:
                 logger.error(f"💥 CRITICAL: Flow failed. Error: {str(e)}")
