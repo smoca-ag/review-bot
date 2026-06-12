@@ -72,6 +72,13 @@ class TestToolsE2E(unittest.IsolatedAsyncioTestCase):
         self.assertIn("review_bot", result)
         self.assertIn("pyproject.toml", result)
 
+    def test_e2e_list_files_recursive(self):
+        result = list_files(self.ctx, ".", recursive=True)
+        self.assertNotIn("Error", result)
+        self.assertIn("review_bot", result)
+        self.assertIn("pyproject.toml", result)
+        self.assertIn("tools.py", result)
+
     def test_e2e_fetch_file_content(self):
         result = fetch_file_content(self.ctx, "pyproject.toml")
         self.assertNotIn("Error", result)
