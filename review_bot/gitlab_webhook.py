@@ -1,15 +1,17 @@
+import asyncio
+import hmac
 import http.server
 import json
 import logging
 import multiprocessing
 import os
+import signal as signal_module
 import sys
 import threading
 
 from opentelemetry import trace
 
-from review_bot import BackendType, review
-from review_bot.telemetry import setup_telemetry
+from review_bot import review
 
 # --- Logger Setup ---
 # Get a logger for this module.
@@ -17,14 +19,29 @@ from review_bot.telemetry import setup_telemetry
 logger = logging.getLogger(__name__)
 
 # --- Configuration (from Environment Variables) ---
-setup_telemetry()
-HOST = os.environ.get("WEBHOOK_HOST", "0.0.0.0")
-PORT = int(os.environ.get("WEBHOOK_PORT", "8080"))
-GITLAB_WEBHOOK_LABEL = os.environ.get("GITLAB_WEBHOOK_LABEL", "ai-review-requested")
-GITLAB_WEBHOOK_REVIEW_ALL = (
-    os.environ.get("GITLAB_WEBHOOK_REVIEW_ALL", "false").lower() == "true"
-)
-GITLAB_WEBHOOK_TOKEN = os.environ.get("GITLAB_WEBHOOK_TOKEN")
+# Read lazily in main() to allow env changes between runs / in tests.
+HOST = None
+PORT = None
+GITLAB_WEBHOOK_LABEL = None
+GITLAB_WEBHOOK_REVIEW_ALL = None
+GITLAB_WEBHOOK_TOKEN = None
+
+
+def _load_config():
+    """Populate module-level config from environment variables."""
+    global \
+        HOST, \
+        PORT, \
+        GITLAB_WEBHOOK_LABEL, \
+        GITLAB_WEBHOOK_REVIEW_ALL, \
+        GITLAB_WEBHOOK_TOKEN
+    HOST = os.environ.get("WEBHOOK_HOST", "0.0.0.0")
+    PORT = int(os.environ.get("WEBHOOK_PORT", "8080"))
+    GITLAB_WEBHOOK_LABEL = os.environ.get("GITLAB_WEBHOOK_LABEL", "ai-review-requested")
+    GITLAB_WEBHOOK_REVIEW_ALL = (
+        os.environ.get("GITLAB_WEBHOOK_REVIEW_ALL", "false").lower() == "true"
+    )
+    GITLAB_WEBHOOK_TOKEN = os.environ.get("GITLAB_WEBHOOK_TOKEN")
 
 
 # --- The function to run in a separate process ---
@@ -38,7 +55,7 @@ def start_ai_review(mr_id, mr_url):
     try:
         logger.info(f"Processing URL: {mr_url}")
         # Simulate a long-running task (e.g., API calls, code analysis)
-        review(mr_url, BackendType.GITLAB, post=True)
+        asyncio.run(review(mr_url, backend="gitlab", post=True))
         logger.info(f"Finished URL: {mr_url}")
     except Exception as e:
         logger.error(f"ERROR during AI review for MR !{mr_url}: {e}", exc_info=True)
@@ -65,7 +82,13 @@ class ReviewManager:
                 # Cancel the currently running process
                 logger.info(f"Canceling currently running review for MR !{mr_id}")
                 if self.active_process and self.active_process.is_alive():
-                    self.active_process.terminate()
+                    try:
+                        os.kill(self.active_process.pid, signal_module.SIGTERM)
+                        self.active_process.join(timeout=15)
+                    except (ProcessLookupError, OSError):
+                        pass
+                    if self.active_process.is_alive():
+                        self.active_process.terminate()
                 self.active_process = None
                 self.active_mr_id = None
 
@@ -125,7 +148,9 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
         """Validates the 'X-Gitlab-Token' header against our secret."""
         received_token = self.headers.get("X-Gitlab-Token")
 
-        if received_token == GITLAB_WEBHOOK_TOKEN:
+        if received_token and hmac.compare_digest(
+            received_token, GITLAB_WEBHOOK_TOKEN or ""
+        ):
             return True
         else:
             client_ip = self.client_address[0]
@@ -223,8 +248,12 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
 
         changes = data.get("changes", {})
         if "labels" in changes:
-            prev_labels = [l["title"] for l in changes["labels"].get("previous", [])]
-            curr_labels = [l["title"] for l in changes["labels"].get("current", [])]
+            prev_labels = [
+                label["title"] for label in changes["labels"].get("previous", [])
+            ]
+            curr_labels = [
+                label["title"] for label in changes["labels"].get("current", [])
+            ]
             if (
                 GITLAB_WEBHOOK_LABEL in curr_labels
                 and GITLAB_WEBHOOK_LABEL not in prev_labels
@@ -276,7 +305,7 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
         if trigger_review:
             if mr_url == "N/A" or mr_id == "N/A":
                 logger.error(
-                    f"Could not find MR ID or URL for incoming event. Aborting review."
+                    "Could not find MR ID or URL for incoming event. Aborting review."
                 )
                 return
 
@@ -310,6 +339,8 @@ def main():
     except RuntimeError:
         pass
 
+    _load_config()
+
     # --- Logging Configuration ---
     # Configure logging here so it's only active when main() is called
     logging.basicConfig(
@@ -317,6 +348,12 @@ def main():
         format="%(asctime)s - %(processName)s - %(levelname)s - %(message)s",
         stream=sys.stdout,
     )
+
+    # --- Telemetry Setup ---
+    # Initialize telemetry after multiprocessing is configured to avoid issues on macOS
+    from review_bot.telemetry import setup_telemetry
+
+    setup_telemetry()
 
     # --- CRITICAL: Token Check ---
     if not GITLAB_WEBHOOK_TOKEN:
@@ -328,17 +365,31 @@ def main():
     review_manager = ReviewManager()
 
     httpd = None  # Initialize to None for the finally block
-    try:
-        server_address = (HOST, PORT)
-        httpd = http.server.HTTPServer(server_address, GitLabWebhookHandler)
+    shutdown_event = threading.Event()
 
-        logger.info(f"Starting GitLab webhook server...")
+    def _shutdown_handler(signum, frame):
+        logger.info(f"Received signal {signum}. Shutting down...")
+        shutdown_event.set()
+
+    try:
+        import signal
+
+        signal.signal(signal.SIGINT, _shutdown_handler)
+        signal.signal(signal.SIGTERM, _shutdown_handler)
+
+        server_address = (HOST, PORT)
+        # Use ThreadingHTTPServer to handle multiple concurrent requests
+        httpd = http.server.ThreadingHTTPServer(server_address, GitLabWebhookHandler)
+
+        logger.info("Starting GitLab webhook server...")
         logger.info(f"Listening on: http://{HOST}:{PORT}")
         logger.info(f"Trigger Label: '{GITLAB_WEBHOOK_LABEL}'")
         logger.info("Token: Set (hidden for security)")
         logger.info("Press Ctrl+C to shut down.")
 
-        httpd.serve_forever()
+        # Serve until shutdown signal is received
+        while not shutdown_event.wait(timeout=1):
+            httpd.handle_request()
 
     except KeyboardInterrupt:
         logger.info("Shutting down server...")

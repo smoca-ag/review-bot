@@ -1,0 +1,24 @@
+stages:
+  - test
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  paths:
+    - .cache/pip
+    - .venv/
+
+test:
+  image: python:3.11
+  stage: test
+  before_script:
+    # Set up Python virtual environment and install dependencies
+    - podman ps || podman machine start
+    - python3 -m venv .venv
+    - source .venv/bin/activate
+    - pip install --upgrade pip
+    - pip install -e .
+  script:
+    # Run all tests in the tests/ directory
+    - python -m unittest discover -s tests

@@ -1,7 +1,7 @@
 [project]
 name = "review_bot"
-description = "A simple but using local llms to review code"
-version = "0.1"
+description = "A simple AI code review bot using local LLMs"
+version = "0.1.0"
 readme = "Readme.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -9,14 +9,23 @@ authors = [
   {name = "David Gunzinger", email = "david.gunzinger@smoca.ch"},
   {name = "Martin Defuns", email = "martin.defuns@smoca.ch"}
 ]
+requires-python = ">=3.11"
 dependencies = [
-    "python-dotenv==1.2.2",
-    "requests==2.33.1",
-    "openai==2.36.0",
-    "beautifulsoup4==4.14.3",
-    "pydantic_ai==1.92.0",
-    "opentelemetry-sdk==1.39.1",
-    "opentelemetry-exporter-otlp==1.39.1"
+     "python-dotenv==1.2.2",
+     "requests==2.33.1",
+     "openai==2.36.0",
+     "beautifulsoup4==4.14.3",
+     "pydantic_ai==1.92.0",
+     "opentelemetry-sdk==1.39.1",
+     "opentelemetry-exporter-otlp==1.39.1",
+     "chromadb>=1.0.0",
+     "tree-sitter>=0.25",
+     "tree-sitter-typescript>=0.23",
+     "tree-sitter-ruby>=0.23",
+     "tree-sitter-swift>=0.7",
+     "tree-sitter-kotlin>=1.1",
+     "tree-sitter-python",
+
 ]
 
 
@@ -25,5 +34,5 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-review-bot = "review_bot:main"
+review-bot = "review_bot.cli:main"
 review-bot-gitlab-webhook = "review_bot.gitlab_webhook:main"
