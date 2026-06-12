@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+from dataclasses import replace
 from datetime import date
 
 import chromadb
@@ -43,7 +44,8 @@ if not logger.handlers:
 # This ensures their prefixes match from the very first token.
 SHARED_SUB_AGENT_SYSTEM_PROMPT = (
     "You are an expert AI Code Reviewer. Analyze codebase changes to find issues in your assigned specialty.\n\n"
-    "--- 4-PHASE WORKFLOW (execute in order) ---\n\n"
+    "--- 4-PHASE WORKFLOW (execute in order) ---\n"
+    "Track every issue with update_todo: add after triage, update state as it moves, drop false positives, list to review.\n\n"
     "## 1. TRIAGE\n"
     "Score each changed section by risk. Work highest-to-lowest.\n"
     "  5=Critical: auth, crypto, I/O, SQL, shell, secrets, payments, permissions\n"
@@ -139,12 +141,13 @@ async def async_review_process(
         # 💡 CACHE OPTIMIZATION: Tailor the specialty instructions as a suffix appended to the identical base prompt sequence.
         reports = {}
         for agent_def in SUB_AGENTS:
+            agent_deps = replace(deps, todo_items=[])
             res = await run_agent_with_span(
                 agent_def.name,
                 agents[f"{agent_def.name}_agent"],
                 secure_base_prompt + agent_def.specialty_prompt,
-                deps,
-                usage_limits,
+                deps=agent_deps,
+                usage_limits=usage_limits,
             )
             reports[agent_def.name] = res.output
 
@@ -158,8 +161,9 @@ async def async_review_process(
             safe_report = wrap_in_cdata(report.model_dump_json())
             critic_prompt += f"### {name.upper()} REPORT:\n<{name}_report>\n{safe_report}\n</{name}_report>\n\n"
 
+        critic_deps = replace(deps, todo_items=[])
         with tracer.start_as_current_span("agent_critic"):
-            final_result = await agents["critic_agent"].run(critic_prompt, deps=deps, usage_limits=usage_limits)
+            final_result = await agents["critic_agent"].run(critic_prompt, deps=critic_deps, usage_limits=usage_limits)
 
         review_result = final_result.output
         span = trace.get_current_span()

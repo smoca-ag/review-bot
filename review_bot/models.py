@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -10,6 +10,7 @@ class ReviewDeps:
     mr_description: str
     vector_index: Any
     dependency_graph: Any = None
+    todo_items: list[dict] = field(default_factory=list)
 
 
 class LineComment(BaseModel):
