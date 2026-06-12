@@ -5,6 +5,14 @@ from review_bot.models import FinalReviewResult
 _CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.9"))
 
 
+def _derive_severity(comment) -> str:
+    if comment.risk_score >= 5 and comment.confidence_score >= 0.8:
+        return "CRITICAL"
+    if comment.risk_score >= 4 or (comment.risk_score >= 3 and comment.confidence_score >= 0.8):
+        return "MAJOR"
+    return "MINOR"
+
+
 def format_and_post_review(logger, mr_request, review_result: FinalReviewResult, post):
     status_icon = "✅" if review_result.recommend_approval else "❌"
     header_identifier = "# 🤖 AI Review"
@@ -52,21 +60,25 @@ def format_and_post_review(logger, mr_request, review_result: FinalReviewResult,
         markdown_comment += (
             "## 📌 Inline Comments\n"
             + "\n".join(
-                f"- {comment.file}:{comment.line} (Confidence {comment.confidence_score}): **{comment.severity.upper()} ({comment.category})**: {comment.comment}"
+                f"- {comment.file}:{comment.line}"
+                f"{'-' + str(comment.end_line) if comment.end_line else ''}"
+                f" (Risk {comment.risk_score}, Confidence {comment.confidence_score})"
+                f" **{_derive_severity(comment)} ({comment.category})**: {comment.comment}"
                 for comment in review_result.critical_line_comments
             )
             + "\n\n"
         )
 
     for comment in review_result.critical_line_comments:
-        text = f"**{comment.severity.upper()} ({comment.category})**: {comment.comment}"
+        severity = _derive_severity(comment)
+        text = f"**{severity} ({comment.category})**: {comment.comment}"
         logger.info(
-            f"{comment.file}:{comment.line} (Confidence {comment.confidence_score}): {text}"
+            f"{comment.file}:{comment.line} (Risk {comment.risk_score}, Confidence {comment.confidence_score}): {text}"
         )
         if (
             post
             and comment.confidence_score >= _CONFIDENCE_THRESHOLD
-            and comment.severity.upper() != "MINOR"
+            and severity != "MINOR"
         ):
             mr_request.post_line_review(text, comment.file, comment.line)
 

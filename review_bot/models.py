@@ -14,18 +14,33 @@ class ReviewDeps:
 
 class LineComment(BaseModel):
     file: str = Field(description="The file path where the issue was found.")
-    line: int = Field(description="The line number of the issue.")
-    severity: Literal["critical", "major", "minor"] = Field(
-        description="Severity of the issue."
+    line: int = Field(description="The starting line number of the issue.")
+    end_line: int | None = Field(
+        default=None,
+        description="The ending line number for multi-line findings. None if single line.",
+    )
+    risk_score: int = Field(
+        ge=1,
+        le=5,
+        description="Risk score from Phase 1 triage (1=negligible, 5=critical).",
     )
     category: str = Field(description="e.g., security, logic, performance, test.")
-    false_positive_reasoning: str = Field(
-        description="Play devil's advocate: Why might this code actually be correct?"
+    hypothesis: str = Field(
+        description="The falsifiable claim: 'In <file>:<line>, <claim> because <evidence>'."
+    )
+    falsification_method: str = Field(
+        description="How this hypothesis was tested: tool call and query used to attempt to disprove it."
+    )
+    verification: Literal["confirmed", "inconclusive"] = Field(
+        description="'confirmed' if falsification failed (hypothesis stands), 'inconclusive' if test was unclear."
+    )
+    counter_argument: str = Field(
+        description="Devil's advocate: Why might this code actually be correct?"
     )
     confidence_score: float = Field(
         ge=0.0, le=1.0, description="Certainty score from 0.0 to 1.0."
     )
-    comment: str = Field(description="The comment text.")
+    comment: str = Field(description="The human-readable comment text for the review.")
 
 
 class SubAgentReport(BaseModel):
