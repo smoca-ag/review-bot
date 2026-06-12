@@ -12,7 +12,7 @@ import review_bot
 from review_bot.agents import SUB_AGENTS, critic_agent_def
 
 # Refactored module imports
-from review_bot.config import ensure_setup, resolve_model
+from review_bot.config import AGENT_REQUEST_LIMIT, ensure_setup, resolve_model
 from review_bot.dependency_graph import build_dependency_graph
 from review_bot.formatter import format_and_post_review
 from review_bot.models import FinalReviewResult, ReviewDeps
@@ -84,10 +84,10 @@ def _get_agents() -> dict:
 # ==========================================
 # Async Orchestration & Review Logic
 # ==========================================
-async def run_agent_with_span(agent_name, agent, prompt, deps):
+async def run_agent_with_span(agent_name, agent, prompt, deps, usage_limits):
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span(f"agent_{agent_name}") as _span:
-        return await agent.run(prompt, deps=deps)
+        return await agent.run(prompt, deps=deps, usage_limits=usage_limits)
 
 
 async def async_review_process(
@@ -102,6 +102,10 @@ async def async_review_process(
     """Executes the sub-agents in sequence (to keep the prefix cache), then runs the critic."""
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span("async_review_process"):
+        from pydantic_ai.usage import UsageLimits
+
+        usage_limits = UsageLimits(request_limit=AGENT_REQUEST_LIMIT)
+
         deps = ReviewDeps(
             mr_request=mr_request,
             mr_description=mr_description,
@@ -123,6 +127,7 @@ async def async_review_process(
                 agents[f"{agent_def.name}_agent"],
                 secure_base_prompt + agent_def.specialty_prompt,
                 deps,
+                usage_limits,
             )
             reports[agent_def.name] = res.output
 
@@ -137,7 +142,7 @@ async def async_review_process(
             critic_prompt += f"### {name.upper()} REPORT:\n<{name}_report>\n{safe_report}\n</{name}_report>\n\n"
 
         with tracer.start_as_current_span("agent_critic"):
-            final_result = await agents["critic_agent"].run(critic_prompt, deps=deps)
+            final_result = await agents["critic_agent"].run(critic_prompt, deps=deps, usage_limits=usage_limits)
 
         review_result = final_result.output
         span = trace.get_current_span()

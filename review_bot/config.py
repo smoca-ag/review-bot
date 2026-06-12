@@ -22,6 +22,8 @@ EXCLUDE_DIRS: frozenset[str] = frozenset({
 
 EXCLUDE_DOT_DIRS: bool = True
 
+AGENT_REQUEST_LIMIT: int = int(os.getenv("AGENT_REQUEST_LIMIT", "200"))
+
 
 def _get_model() -> str:
     model_name = os.getenv("ANTHROPIC_DEFAULT_OPUS_MODEL") or os.getenv(
