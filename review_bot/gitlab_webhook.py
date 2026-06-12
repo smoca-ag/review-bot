@@ -84,7 +84,7 @@ class ReviewManager:
                 if self.active_process and self.active_process.is_alive():
                     try:
                         os.kill(self.active_process.pid, signal_module.SIGTERM)
-                        self.active_process.join(timeout=5)
+                        self.active_process.join(timeout=15)
                     except (ProcessLookupError, OSError):
                         pass
                     if self.active_process.is_alive():

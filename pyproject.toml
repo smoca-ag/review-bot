@@ -24,6 +24,8 @@ dependencies = [
      "tree-sitter-ruby>=0.23",
      "tree-sitter-swift>=0.7",
      "tree-sitter-kotlin>=1.1",
+     "tree-sitter-python",
+
 ]
 
 
