@@ -43,7 +43,7 @@ def fetch_file_content(
         max_lines: The maximum number of lines to return.
     """
     try:
-        raw = ctx.deps.mr_request.get_file_raw(file_path)
+        raw = ctx.deps.container_manager.get_file_raw(file_path)
         if raw is None:
             return f"Error: File '{file_path}' not found."
         return paginate_text(raw, start_line, max_lines, add_line_numbers=True)
@@ -70,7 +70,7 @@ def list_files(
         max_lines: The maximum number of lines to return.
     """
     try:
-        raw = ctx.deps.mr_request.list_files(path, recursive=recursive)
+        raw = ctx.deps.container_manager.list_files(path, recursive=recursive)
         if raw.startswith("Error"):
             return raw
         return paginate_text(raw, start_line, max_lines)
@@ -97,7 +97,7 @@ def scan_code(
         max_lines: The maximum number of lines to return.
     """
     try:
-        raw = ctx.deps.mr_request.scan_code(pattern, path)
+        raw = ctx.deps.container_manager.scan_code(pattern, path)
         if raw.startswith("Error") or raw == "No matches found.":
             return raw
         return paginate_text(raw, start_line, max_lines)
@@ -127,7 +127,7 @@ async def execute_command(
         max_lines: The maximum number of lines of output to return.
     """
     try:
-        raw = ctx.deps.mr_request.execute_command(command)
+        raw = ctx.deps.container_manager.execute_command(command)
         return paginate_text(raw, start_line, max_lines)
     except Exception as e:
         return f"Error executing command: {str(e)}"

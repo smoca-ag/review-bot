@@ -11,6 +11,7 @@ from pydantic_ai.capabilities import Thinking
 
 import review_bot
 from review_bot.agents import SUB_AGENTS, critic_agent_def
+from review_bot.backend.container_manager import ContainerManager
 
 # Refactored module imports
 from review_bot.config import AGENT_REQUEST_LIMIT, ensure_setup, resolve_model
@@ -114,6 +115,7 @@ async def run_agent_with_span(agent_name, agent, prompt, deps, usage_limits):
 async def async_review_process(
     logger,
     mr_request,
+    container_manager,
     mr_description,
     secure_base_prompt,
     post,
@@ -129,6 +131,7 @@ async def async_review_process(
 
         deps = ReviewDeps(
             mr_request=mr_request,
+            container_manager=container_manager,
             mr_description=mr_description,
             vector_index=vector_index,
             dependency_graph=dep_graph,
@@ -196,7 +199,8 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
             logger.info("Merge Request skipped (either closed or draft).")
             return
 
-        mr_request.setup_container()
+        container_mgr = ContainerManager(logger)
+        container_mgr.setup(mr_request.repo_dir)
 
         vector_index = None
         chroma_client = None
@@ -257,6 +261,7 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
                 await async_review_process(
                     logger,
                     mr_request,
+                    container_mgr,
                     mr_description,
                     secure_base_prompt,
                     post,
@@ -273,4 +278,5 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
         finally:
             if chroma_client is not None:
                 chroma_client.close()
+            container_mgr.cleanup()
             mr_request.cleanup()

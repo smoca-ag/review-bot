@@ -86,6 +86,7 @@ class App; end
 
         deps = ReviewDeps(
             mr_request=MagicMock(),
+            container_manager=MagicMock(),
             mr_description="E2E Test MR",
             vector_index=None,
             dependency_graph=self.graph,

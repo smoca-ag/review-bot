@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 @dataclass
 class ReviewDeps:
     mr_request: Any
+    container_manager: Any
     mr_description: str
     vector_index: Any
     dependency_graph: Any = None

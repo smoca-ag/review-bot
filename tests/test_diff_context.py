@@ -39,6 +39,7 @@ def _make_ctx(diff_text: str) -> RunContext:
     backend.diff.return_value = diff_text
     deps = ReviewDeps(
         mr_request=backend,
+        container_manager=MagicMock(),
         mr_description="test",
         vector_index=None,
     )
@@ -66,7 +67,7 @@ class TestDiffContextNoDiff(unittest.TestCase):
     def test_none_diff(self):
         backend = MagicMock()
         backend.diff.return_value = None
-        deps = ReviewDeps(mr_request=backend, mr_description="test", vector_index=None)
+        deps = ReviewDeps(mr_request=backend, container_manager=MagicMock(), mr_description="test", vector_index=None)
 
         class DummyModel:
             pass

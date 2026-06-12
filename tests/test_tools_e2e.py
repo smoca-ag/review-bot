@@ -7,6 +7,7 @@ import unittest
 import chromadb
 from pydantic_ai import RunContext
 
+from review_bot.backend.container_manager import ContainerManager
 from review_bot.backend.git import Git
 from review_bot.models import ReviewDeps
 from review_bot.rag import build_vector_index
@@ -28,11 +29,11 @@ if not logger.handlers:
 class TestToolsE2E(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
-        # Set up the Git backend pointing to the current repository
         cls.backend = Git(logger, ".")
-        cls.backend.setup_container()
 
-        # Set up ChromaDB and build the vector index
+        cls.container_mgr = ContainerManager(logger)
+        cls.container_mgr.setup(cls.backend.repo_dir)
+
         cls.chroma_client = chromadb.EphemeralClient()
         cls.collection = cls.chroma_client.create_collection("codebase_e2e")
         cls.indexed_count = build_vector_index(cls.backend.repo_dir, cls.collection)
@@ -41,18 +42,19 @@ class TestToolsE2E(unittest.IsolatedAsyncioTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        # Cleanup the container
+        if hasattr(cls, "container_mgr"):
+            cls.container_mgr.cleanup()
         if hasattr(cls, "backend"):
             cls.backend.cleanup()
 
     def setUp(self):
         self.deps = ReviewDeps(
             mr_request=self.backend,
+            container_manager=self.container_mgr,
             mr_description="E2E Test MR",
             vector_index=self.collection,
         )
 
-        # We use a dummy model object since RunContext requires it
         class DummyModel:
             pass
 
@@ -97,11 +99,9 @@ class TestToolsE2E(unittest.IsolatedAsyncioTestCase):
         self.assertIn("pyproject.toml", result)
 
     def test_e2e_vector_search(self):
-        # Only run if we actually indexed something
         if self.indexed_count == 0:
             self.skipTest("No files were indexed, skipping vector search test.")
 
-        # Search for something that we know is in the codebase
         result = vector_search(self.ctx, "AI Code Review")
         self.assertNotIn("Error", result)
         self.assertNotIn("Vector search is not available", result)
