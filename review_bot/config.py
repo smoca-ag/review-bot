@@ -19,11 +19,5 @@ def ensure_setup() -> None:
     setup_telemetry()
 
 
-_model: str | None = None
-
-
 def resolve_model() -> str:
-    global _model
-    if _model is None:
-        _model = _get_model()
-    return _model
+    return _get_model()
