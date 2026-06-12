@@ -90,12 +90,14 @@ def _get_agents() -> dict:
     agents = {}
     for agent_def in SUB_AGENTS:
         agents[f"{agent_def.name}_agent"] = Agent(
-            output_type=agent_def.output_type, **agent_config
+            output_type=agent_def.output_type, name=agent_def.name, **agent_config
         )
 
     critic_config = agent_config.copy()
     agents["critic_agent"] = Agent(
-        output_type=critic_agent_def.output_type, **critic_config
+        output_type=critic_agent_def.output_type,
+        name=critic_agent_def.name,
+        **critic_config,
     )
     return agents
 
