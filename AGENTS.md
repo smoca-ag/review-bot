@@ -2,6 +2,34 @@
 
 AI-powered code review bot built with [Pydantic AI](https://ai.pydantic.dev/). Reviews GitLab Merge Requests or local git diffs using a multi-agent pipeline, posts findings as inline comments.
 
+## Prerequisites
+
+- Python 3.11+
+- [Podman](https://podman.io/) (on macOS: `podman machine start`; container built from `review-container/Dockerfile`)
+- For `gitlab` backend: GitLab Personal Access Token with `api` scope
+
+## Development Commands
+
+```bash
+# One-time setup
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+
+# Run tests
+python -m unittest discover -s tests
+
+# Type check
+mypy review_bot/
+```
+
+## Code Style
+
+- Imports: standard library → third-party → local (`review_bot.*`), each group separated by a blank line
+- Docstrings: Google-style (`Args:`, `Returns:`, `Raises:`)
+- Type hints: Python 3.10+ union syntax (`str | None`) — do NOT use `Optional[str]`
+- Module-level docstring at top of each file describing the module's purpose
+
 ## Entry Points
 
 | Command | Module | Purpose |
@@ -97,6 +125,7 @@ Tools are defined as `pydantic_ai.Tool` wrapping plain functions. Each receives 
 | `GITLAB_WEBHOOK_REVIEW_ALL` | Bypass label requirement (`true`/`false`) |
 | `GITLAB_WEBHOOK_TOKEN` | Secret token for webhook validation |
 | `CONFIDENCE_THRESHOLD` | Min confidence for inline comments (default `0.9`) |
+| `AGENT_REQUEST_LIMIT` | Max API requests per agent run (default `200`) |
 | `MAX_LINES` / `MAX_LINE_LENGTH` | Diff truncation limits (default `200` / `150`) |
 
 ## Testing

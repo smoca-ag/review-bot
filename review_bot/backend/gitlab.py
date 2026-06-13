@@ -249,6 +249,7 @@ class Gitlab(BaseBackend):
             clone_url = project["http_url_to_repo"]
 
             env = os.environ.copy()
+            assert self.private_token is not None
             env["GL_TOKEN"] = self.private_token
 
             env["GIT_CONFIG_COUNT"] = "1"

@@ -115,8 +115,8 @@ class ContainerManager:
         except subprocess.TimeoutExpired:
             return f"Error: Command timed out after {timeout} seconds."
         except subprocess.CalledProcessError as e:
-            output = e.stdout if e.stdout else "(no output)"
-            return f"Command failed with exit code {e.returncode}:\n{output}"
+            err_output: str = e.stdout if e.stdout else "(no output)"
+            return f"Command failed with exit code {e.returncode}:\n{err_output}"
         except ValueError:
             return "Error: Failed to parse command."
 
