@@ -42,7 +42,6 @@ class ContainerManager:
                     "--systemd=always",
                     "--security-opt=no-new-privileges:true",
                     "--cap-drop=ALL",
-                    "--cap-add=CAP_SYS_ADMIN",
                     "--cap-add=CAP_NET_BIND_SERVICE",
                     "--cap-add=CAP_NET_RAW",
                     "--cap-add=CAP_CHOWN",

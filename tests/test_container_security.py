@@ -50,7 +50,7 @@ class TestContainerSecurity(unittest.TestCase):
         cap_hex = out.strip().split("\t")[-1]
         cap_int = int(cap_hex, 16)
 
-        dangerous = {12, 16, 17, 19, 23, 34}
+        dangerous = {12, 16, 17, 19, 21, 23, 34}
         for cap_bit in dangerous:
             self.assertFalse(
                 cap_int & (1 << cap_bit),
