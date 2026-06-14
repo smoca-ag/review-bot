@@ -14,7 +14,7 @@ AI-powered code review bot built with [Pydantic AI](https://ai.pydantic.dev/). R
 # One-time setup
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e ".[dev]"
 
 # Run tests
 python -m unittest discover -s tests
