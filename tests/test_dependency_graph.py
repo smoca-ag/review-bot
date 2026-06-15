@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import tree_sitter as ts
 from pydantic_ai import RunContext
 
-from review_bot.dependency_graph import (
+from review_bot.graph import (
     DependencyGraph,
     ImportRef,
     ModuleInfo,

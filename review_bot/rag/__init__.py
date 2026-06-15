@@ -7,7 +7,7 @@ import chromadb
 from opentelemetry import trace
 
 from review_bot.config import EXCLUDE_DIRS, EXCLUDE_DOT_DIRS, INDEX_EXTENSIONS
-from review_bot.text_utils import chunk_text
+from review_bot.utils.text import chunk_text
 
 logger = logging.getLogger(__name__)
 

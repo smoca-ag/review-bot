@@ -1,13 +1,13 @@
 import unittest
 
-from review_bot.diff_utils import (
+from review_bot.utils.diff import (
     _truncate_long_line,
     extract_hunks,
     parse_diff_into_files,
     resolve_diff_coordinates,
     truncate_large_diff_files,
 )
-from review_bot.text_utils import (
+from review_bot.utils.text import (
     _MAX_LINE_LENGTH,
     chunk_text,
     inject_line_numbers,

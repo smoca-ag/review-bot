@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from review_bot.diff_utils import resolve_diff_coordinates
+from review_bot.utils.diff import resolve_diff_coordinates
 
 REQUEST_TIMEOUT = 30
 

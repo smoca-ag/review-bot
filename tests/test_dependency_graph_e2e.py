@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from pydantic_ai import RunContext
 
-from review_bot.dependency_graph import (
+from review_bot.graph import (
     DependencyGraph,
     ModuleInfo,
     build_dependency_graph,

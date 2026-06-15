@@ -12,9 +12,9 @@ from opentelemetry import trace
 import review_bot
 from review_bot.backend.container_manager import ContainerManager
 from review_bot.config import ensure_setup
-from review_bot.dependency_graph import build_dependency_graph
-from review_bot.formatter import format_and_post_review
-from review_bot.orc import create_agents, build_review_prompt, run_agent_pipeline
+from review_bot.graph import build_dependency_graph
+from review_bot.orchestration import create_agents, build_review_prompt, run_agent_pipeline
+from review_bot.orchestration.formatter import format_and_post_review
 from review_bot.rag import create_vector_index
 
 logger = logging.getLogger(__name__)

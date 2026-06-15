@@ -1,6 +1,6 @@
 import unittest
 
-from review_bot.formatter import _derive_severity
+from review_bot.orchestration.formatter import _derive_severity
 from review_bot.models import LineComment
 
 
