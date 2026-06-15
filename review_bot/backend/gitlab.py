@@ -13,9 +13,9 @@ from opentelemetry import trace
 
 from review_bot.backend.base_backend import BaseBackend
 from review_bot.backend.gitlab_poster import GitlabReviewPoster
+from review_bot.diff_utils import resolve_diff_coordinates
 
 logger = logging.getLogger(__name__)
-from review_bot.text_utils import resolve_diff_coordinates
 
 tracer = trace.get_tracer(__name__)
 

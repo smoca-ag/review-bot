@@ -1,7 +1,41 @@
+"""RAG index — walks the repo, chunks source files, loads into an ephemeral ChromaDB."""
+
+import logging
 import os
+
+import chromadb
+from opentelemetry import trace
 
 from review_bot.config import EXCLUDE_DIRS, EXCLUDE_DOT_DIRS, INDEX_EXTENSIONS
 from review_bot.text_utils import chunk_text
+
+logger = logging.getLogger(__name__)
+
+
+def create_vector_index(repo_dir: str | None) -> tuple:
+    """Create an ephemeral ChromaDB vector index for the given repository.
+
+    Returns a ``(chroma_client, collection)`` tuple, or ``(None, None)`` on
+    failure or when *repo_dir* is ``None``.
+    """
+    chroma_client = None
+    vector_index = None
+    with trace.get_tracer(__name__).start_as_current_span("rag_setup") as rag_span:
+        if repo_dir:
+            rag_span.set_attribute("rag.repo_dir", repo_dir)
+        try:
+            chroma_client = chromadb.EphemeralClient()
+            collection = chroma_client.create_collection("codebase")
+            if repo_dir:
+                indexed_count = build_vector_index(repo_dir, collection)
+                if indexed_count > 0:
+                    vector_index = collection
+                    logger.info(f"Built vector index with {indexed_count} chunks.")
+                    rag_span.set_attribute("rag.indexed_chunks", indexed_count)
+        except Exception as e:
+            logger.warning(f"Failed to build vector index: {e}.")
+            rag_span.set_attribute("rag.error", str(e))
+    return chroma_client, vector_index
 
 
 def build_vector_index(repo_dir: str, collection) -> int:

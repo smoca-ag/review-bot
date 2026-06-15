@@ -1,16 +1,18 @@
 import unittest
 
-from review_bot.text_utils import (
-    _MAX_LINE_LENGTH,
+from review_bot.diff_utils import (
     _truncate_long_line,
-    chunk_text,
     extract_hunks,
-    inject_line_numbers,
-    is_binary,
-    paginate_text,
     parse_diff_into_files,
     resolve_diff_coordinates,
     truncate_large_diff_files,
+)
+from review_bot.text_utils import (
+    _MAX_LINE_LENGTH,
+    chunk_text,
+    inject_line_numbers,
+    is_binary,
+    paginate_text,
     wrap_in_cdata,
 )
 
