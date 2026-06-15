@@ -25,7 +25,11 @@ dependencies = [
      "tree-sitter-swift>=0.7",
      "tree-sitter-kotlin>=1.1",
      "tree-sitter-python",
+]
 
+[project.optional-dependencies]
+dev = [
+    "mypy",
 ]
 
 

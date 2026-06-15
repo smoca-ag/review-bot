@@ -39,3 +39,11 @@ class BaseBackend:
     def cleanup(self) -> None:
         """Clean up repository resources (subclasses override for temp dirs)."""
         pass
+
+    def post_review(self, text: str) -> None:
+        """Post a top-level review comment (GitLab only; no-op for other backends)."""
+        pass
+
+    def post_line_review(self, text: str, file_path: str, line: int) -> None:
+        """Post an inline line comment (GitLab only; no-op for other backends)."""
+        pass

@@ -90,12 +90,12 @@ def _get_agents() -> dict:
 
     agents = {}
     for agent_def in SUB_AGENTS:
-        agents[f"{agent_def.name}_agent"] = Agent(
+        agents[f"{agent_def.name}_agent"] = Agent(  # type: ignore[call-overload]
             output_type=agent_def.output_type, name=agent_def.name, **agent_config
         )
 
     critic_config = agent_config.copy()
-    agents["critic_agent"] = Agent(
+    agents["critic_agent"] = Agent(  # type: ignore[call-overload]
         output_type=critic_agent_def.output_type,
         name=critic_agent_def.name,
         **critic_config,
@@ -200,7 +200,8 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
             return
 
         container_mgr = ContainerManager(logger)
-        container_mgr.setup(mr_request.repo_dir)
+        if mr_request.repo_dir:
+            container_mgr.setup(mr_request.repo_dir)
 
         vector_index = None
         chroma_client = None
@@ -277,6 +278,6 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
                 return
         finally:
             if chroma_client is not None:
-                chroma_client.close()
+                chroma_client.close()  # type: ignore[attr-defined]
             container_mgr.cleanup()
             mr_request.cleanup()

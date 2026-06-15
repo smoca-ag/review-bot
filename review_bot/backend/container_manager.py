@@ -40,6 +40,20 @@ class ContainerManager:
                     "-d",
                     "--rm",
                     "--systemd=always",
+                    "--security-opt=no-new-privileges:true",
+                    "--cap-drop=ALL",
+                    "--cap-add=CAP_NET_BIND_SERVICE",
+                    "--cap-add=CAP_NET_RAW",
+                    "--cap-add=CAP_CHOWN",
+                    "--cap-add=CAP_DAC_OVERRIDE",
+                    "--cap-add=CAP_FOWNER",
+                    "--cap-add=CAP_SETUID",
+                    "--cap-add=CAP_SETGID",
+                    "--cap-add=CAP_KILL",
+                    "--cap-add=CAP_SYS_CHROOT",
+                    "--memory=4g",
+                    "--memory-swap=4g",
+                    "--cpus=2",
                     "--name",
                     self.container_name,
                     "-v",
@@ -115,8 +129,8 @@ class ContainerManager:
         except subprocess.TimeoutExpired:
             return f"Error: Command timed out after {timeout} seconds."
         except subprocess.CalledProcessError as e:
-            output = e.stdout if e.stdout else "(no output)"
-            return f"Command failed with exit code {e.returncode}:\n{output}"
+            err_output: str = e.stdout if e.stdout else "(no output)"
+            return f"Command failed with exit code {e.returncode}:\n{err_output}"
         except ValueError:
             return "Error: Failed to parse command."
 

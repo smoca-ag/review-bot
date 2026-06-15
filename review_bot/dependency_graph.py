@@ -476,7 +476,7 @@ def _detect_language(file_path: str) -> str | None:
 # --- Build the graph ---
 
 def build_dependency_graph(repo_dir: str) -> DependencyGraph:
-    _get_language_configs()
+    lang_configs = _get_language_configs()
     graph = DependencyGraph()
 
     for root, dirs, files in os.walk(repo_dir):
@@ -496,7 +496,7 @@ def build_dependency_graph(repo_dir: str) -> DependencyGraph:
             if lang_name is None:
                 continue
 
-            cfg = _LANGUAGE_CONFIGS.get(lang_name)
+            cfg = lang_configs.get(lang_name)
             if cfg is None:
                 continue
 

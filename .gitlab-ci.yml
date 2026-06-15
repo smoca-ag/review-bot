@@ -1,4 +1,5 @@
 stages:
+  - typecheck
   - test
 
 variables:
@@ -9,6 +10,18 @@ cache:
     - .cache/pip
     - .venv/
 
+typecheck:
+  image: python:3.11
+  stage: typecheck
+  before_script:
+    - python3 -m venv .venv
+    - source .venv/bin/activate
+    - pip install --upgrade pip
+    - pip install -e ".[dev]"
+  script:
+    - source .venv/bin/activate
+    - mypy review_bot/
+
 test:
   image: python:3.11
   stage: test
@@ -18,7 +31,7 @@ test:
     - python3 -m venv .venv
     - source .venv/bin/activate
     - pip install --upgrade pip
-    - pip install -e .
+    - pip install -e ".[dev]"
   script:
     # Run all tests in the tests/ directory
     - python -m unittest discover -s tests

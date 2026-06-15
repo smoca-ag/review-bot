@@ -1,6 +1,8 @@
 import os
 from datetime import datetime, timezone
 
+from typing import Literal
+
 from pydantic_ai import RunContext, Tool
 
 from review_bot.models import BotImprovementSuggestion, ReviewDeps
@@ -166,7 +168,13 @@ def vector_search(ctx: RunContext[ReviewDeps], query: str, top_k: int = 5) -> st
 
 def suggest_bot_improvement(
     ctx: RunContext[ReviewDeps],
-    category: str,
+    category: Literal[
+        "missing_tool",
+        "missing_dependency",
+        "missing_capability",
+        "prompt_improvement",
+        "other",
+    ],
     description: str,
     suggestion: str,
     context: str,
