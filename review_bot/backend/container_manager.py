@@ -171,22 +171,20 @@ class ContainerManager:
             return "Error: No active container found."
 
         try:
-            cmd = (
-                [
+            if recursive:
+                cmd = [
                     "podman",
                     "exec",
                     self.container_name,
-                    "find",
+                    "git",
+                    "ls-files",
+                    "--cached",
+                    "--others",
+                    "--exclude-standard",
                     path,
-                    "-type",
-                    "f",
-                    "-o",
-                    "-type",
-                    "d",
                 ]
-                if recursive
-                else ["podman", "exec", self.container_name, "ls", "-1a", path]
-            )
+            else:
+                cmd = ["podman", "exec", self.container_name, "ls", "-1a", path]
             output = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
