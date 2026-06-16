@@ -39,7 +39,18 @@ def create_vector_index(repo_dir: str | None) -> tuple:
 
 
 def build_vector_index(repo_dir: str, collection) -> int:
+    _BATCH = 1000
+
     count = 0
+    batch_ids, batch_docs, batch_meta = [], [], []
+
+    def _flush() -> None:
+        if batch_ids:
+            collection.add(ids=batch_ids, documents=batch_docs, metadatas=batch_meta)
+            batch_ids.clear()
+            batch_docs.clear()
+            batch_meta.clear()
+
     for root, dirs, files in os.walk(repo_dir):
         dirs[:] = [
             d
@@ -62,12 +73,14 @@ def build_vector_index(repo_dir: str, collection) -> int:
                 continue
             chunks = chunk_text(text, rel_path)
             if chunks:
-                ids = [c[0] for c in chunks]
-                documents = [c[1] for c in chunks]
-                metadatas = [
+                batch_ids.extend(c[0] for c in chunks)
+                batch_docs.extend(c[1] for c in chunks)
+                batch_meta.extend(
                     {"file": rel_path, "lines": start_line}
                     for _, _, start_line in chunks
-                ]
-                collection.add(ids=ids, documents=documents, metadatas=metadatas)
+                )
                 count += len(chunks)
+                if count >= _BATCH:
+                    _flush()
+    _flush()
     return count
