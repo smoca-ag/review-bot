@@ -5,7 +5,7 @@ from enum import Enum
 from review_bot.backend.base_backend import BaseBackend
 from review_bot.backend.git import Git  # noqa: F401
 from review_bot.backend.gitlab import Gitlab  # noqa: F401
-from review_bot.review_bot import review  # noqa: F401
+from review_bot.orchestration import review  # noqa: F401
 
 __all__ = [
     "BackendType",

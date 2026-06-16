@@ -1,61 +1,27 @@
-import logging
+"""Per-language tree-sitter extractors and import resolvers."""
+
 import os
-from dataclasses import dataclass, field
-from typing import Any, Callable
 
 import tree_sitter as ts
 
-from review_bot.config import EXCLUDE_DIRS, EXCLUDE_DOT_DIRS, SOURCE_EXTENSIONS
+from review_bot.graph.model import ImportRef, LanguageConfig
 
-logger = logging.getLogger(__name__)
-
-_MAX_FILE_LINES = 5000
+_ts_parse = None
 
 
-@dataclass
-class ImportRef:
-    raw: str
-    resolved: str | None = None
-
-
-@dataclass
-class ModuleInfo:
-    file_path: str
-    language: str
-    imports: list[ImportRef] = field(default_factory=list)
-    definitions: list[str] = field(default_factory=list)
-
-
-@dataclass
-class DependencyGraph:
-    modules: dict[str, ModuleInfo] = field(default_factory=dict)
-    dependents: dict[str, set[str]] = field(default_factory=dict)
-
-    def add_module(self, info: ModuleInfo) -> None:
-        self.modules[info.file_path] = info
-        for imp in info.imports:
-            if imp.resolved:
-                self.dependents.setdefault(imp.resolved, set()).add(info.file_path)
-
-
-@dataclass
-class LanguageConfig:
-    extensions: set[str]
-    language_fn: Callable[[], Any]
-    extract_imports: Callable[[bytes, ts.Language], list[ImportRef]]
-    extract_definitions: Callable[[bytes, ts.Language], list[str]]
-    resolve_import: Callable[[str, str, str], str | None]
+def _parse(source: bytes, lang: ts.Language) -> ts.Tree:
+    global _ts_parse
+    if _ts_parse is None:
+        _ts_parse = ts.Parser
+    return _ts_parse(lang).parse(source)
 
 
 def _ts_language(cfg: LanguageConfig) -> ts.Language:
     return ts.Language(cfg.language_fn())
 
 
-def _parse(source: bytes, lang: ts.Language) -> ts.Tree:
-    return ts.Parser(lang).parse(source)
-
-
 # --- TypeScript / TSX ---
+
 
 def _extract_ts_imports(source: bytes, lang: ts.Language) -> list[ImportRef]:
     tree = _parse(source, lang)
@@ -119,6 +85,7 @@ def _resolve_ts_import(raw: str, source_file: str, repo_dir: str) -> str | None:
 
 
 # --- Ruby ---
+
 
 def _extract_ruby_imports(source: bytes, lang: ts.Language) -> list[ImportRef]:
     tree = _parse(source, lang)
@@ -191,6 +158,7 @@ def _resolve_ruby_import(raw: str, source_file: str, repo_dir: str) -> str | Non
 
 
 # --- Swift ---
+
 
 def _extract_swift_imports(source: bytes, lang: ts.Language) -> list[ImportRef]:
     tree = _parse(source, lang)
@@ -269,6 +237,7 @@ def _resolve_swift_import(raw: str, source_file: str, repo_dir: str) -> str | No
 
 # --- Kotlin ---
 
+
 def _extract_kotlin_imports(source: bytes, lang: ts.Language) -> list[ImportRef]:
     tree = _parse(source, lang)
     imports: list[ImportRef] = []
@@ -326,6 +295,7 @@ def _resolve_kotlin_import(raw: str, source_file: str, repo_dir: str) -> str | N
 
 
 # --- Python ---
+
 
 def _extract_python_imports(source: bytes, lang: ts.Language) -> list[ImportRef]:
     tree = _parse(source, lang)
@@ -394,6 +364,7 @@ def _resolve_python_import(raw: str, source_file: str, repo_dir: str) -> str | N
 
 # --- Language registry ---
 
+
 def _build_language_configs() -> dict[str, LanguageConfig]:
     import tree_sitter_typescript as ts_ts
     import tree_sitter_ruby as ts_rb
@@ -446,86 +417,3 @@ def _build_language_configs() -> dict[str, LanguageConfig]:
         resolve_import=_resolve_python_import,
     )
     return configs
-
-
-EXT_TO_LANG: dict[str, str] = {}
-_LANGUAGE_CONFIGS: dict[str, LanguageConfig] | None = None
-
-
-def _get_language_configs() -> dict[str, LanguageConfig]:
-    global _LANGUAGE_CONFIGS, EXT_TO_LANG
-    if _LANGUAGE_CONFIGS is None:
-        try:
-            _LANGUAGE_CONFIGS = _build_language_configs()
-        except ImportError:
-            logger.warning("tree-sitter language packages not fully installed")
-            _LANGUAGE_CONFIGS = {}
-        EXT_TO_LANG = {}
-        for lang_name, cfg in _LANGUAGE_CONFIGS.items():
-            for ext in cfg.extensions:
-                EXT_TO_LANG[ext] = lang_name
-    return _LANGUAGE_CONFIGS
-
-
-def _detect_language(file_path: str) -> str | None:
-    _get_language_configs()
-    ext = os.path.splitext(file_path)[1].lower()
-    return EXT_TO_LANG.get(ext)
-
-
-# --- Build the graph ---
-
-def build_dependency_graph(repo_dir: str) -> DependencyGraph:
-    lang_configs = _get_language_configs()
-    graph = DependencyGraph()
-
-    for root, dirs, files in os.walk(repo_dir):
-        dirs[:] = [
-            d
-            for d in dirs
-            if d not in EXCLUDE_DIRS
-            and not (EXCLUDE_DOT_DIRS and d.startswith("."))
-        ]
-        for f in files:
-            ext = os.path.splitext(f)[1].lower()
-            if ext not in SOURCE_EXTENSIONS:
-                continue
-            file_path = os.path.join(root, f)
-            rel_path = os.path.relpath(file_path, repo_dir)
-            lang_name = _detect_language(rel_path)
-            if lang_name is None:
-                continue
-
-            cfg = lang_configs.get(lang_name)
-            if cfg is None:
-                continue
-
-            try:
-                with open(file_path, "rb") as fh:
-                    source = fh.read()
-            except (IOError, OSError):
-                continue
-
-            if source.count(b"\n") > _MAX_FILE_LINES:
-                continue
-
-            lang = _ts_language(cfg)
-            try:
-                imports = cfg.extract_imports(source, lang)
-                definitions = cfg.extract_definitions(source, lang)
-            except Exception:
-                logger.debug("tree-sitter parse error for %s", rel_path)
-                continue
-
-            for imp in imports:
-                imp.resolved = cfg.resolve_import(imp.raw, rel_path, repo_dir)
-
-            info = ModuleInfo(
-                file_path=rel_path,
-                language=lang_name,
-                imports=imports,
-                definitions=definitions,
-            )
-            graph.add_module(info)
-
-    return graph

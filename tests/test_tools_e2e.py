@@ -79,7 +79,7 @@ class TestToolsE2E(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Error", result)
         self.assertIn("review_bot", result)
         self.assertIn("pyproject.toml", result)
-        self.assertIn("tools.py", result)
+        self.assertIn("code.py", result)
 
     def test_e2e_fetch_file_content(self):
         result = fetch_file_content(self.ctx, "pyproject.toml")

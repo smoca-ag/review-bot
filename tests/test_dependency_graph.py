@@ -7,12 +7,14 @@ from unittest.mock import MagicMock
 import tree_sitter as ts
 from pydantic_ai import RunContext
 
-from review_bot.dependency_graph import (
+from review_bot.graph import (
     DependencyGraph,
     ImportRef,
     ModuleInfo,
     build_dependency_graph,
-    _detect_language,
+)
+from review_bot.graph.builder import _detect_language, _get_language_configs
+from review_bot.graph.extractors import (
     _extract_kotlin_definitions,
     _extract_kotlin_imports,
     _extract_python_definitions,
@@ -23,7 +25,6 @@ from review_bot.dependency_graph import (
     _extract_swift_imports,
     _extract_ts_definitions,
     _extract_ts_imports,
-    _get_language_configs,
     _resolve_kotlin_import,
     _resolve_python_import,
     _resolve_ruby_import,

@@ -2,7 +2,7 @@ import os
 
 from dotenv import load_dotenv
 
-from review_bot.telemetry import setup_telemetry
+from review_bot.infra.telemetry import setup_telemetry
 
 SOURCE_EXTENSIONS: frozenset[str] = frozenset({
     ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java",
