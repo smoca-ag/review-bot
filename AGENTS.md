@@ -130,8 +130,6 @@ review_bot/
 │   └── diff.py            DiffHunk, hunk extraction, file parsing, truncation, coordinate resolution
 ├── infra/                 Infrastructure (was telemetry.py)
 │   └── telemetry.py       OpenTelemetry setup (OTLP / console exporter)
-└── orc/                   Backward-compat facade → review_bot.orchestration
-    └── __init__.py
 ```
 
 ## Sandboxed Tool Execution
