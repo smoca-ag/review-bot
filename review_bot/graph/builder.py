@@ -6,7 +6,6 @@ import os
 from review_bot.config import EXCLUDE_DIRS, EXCLUDE_DOT_DIRS, SOURCE_EXTENSIONS
 from review_bot.graph.extractors import (
     _build_language_configs,
-    _parse,
     _ts_language,
 )
 from review_bot.graph.model import DependencyGraph, LanguageConfig, ModuleInfo
@@ -48,8 +47,7 @@ def build_dependency_graph(repo_dir: str) -> DependencyGraph:
         dirs[:] = [
             d
             for d in dirs
-            if d not in EXCLUDE_DIRS
-            and not (EXCLUDE_DOT_DIRS and d.startswith("."))
+            if d not in EXCLUDE_DIRS and not (EXCLUDE_DOT_DIRS and d.startswith("."))
         ]
         for f in files:
             ext = os.path.splitext(f)[1].lower()

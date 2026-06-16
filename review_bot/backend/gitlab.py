@@ -1,4 +1,3 @@
-import base64
 import logging
 import os
 import shutil
@@ -13,7 +12,6 @@ from opentelemetry import trace
 
 from review_bot.backend.base_backend import BaseBackend
 from review_bot.backend.gitlab_poster import GitlabReviewPoster
-from review_bot.utils.diff import resolve_diff_coordinates
 
 logger = logging.getLogger(__name__)
 
