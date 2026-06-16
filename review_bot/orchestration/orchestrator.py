@@ -35,25 +35,28 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
         span.set_attribute("review.backend", str(backend))
         span.set_attribute("review.post", post)
 
-        # 1. Load MR data
-        mr_request = review_bot.backend_factory(backend)(logger, spec)
-        logger.info(f"Load the Merge Request {spec}")
-        mr_request.load()
-
-        if not mr_request.is_open() or mr_request.is_draft():
-            logger.info("Merge Request skipped (either closed or draft).")
-            return
-
-        # 2. Setup sandbox
-        container_mgr = ContainerManager(logger)
-        if mr_request.repo_dir:
-            container_mgr.setup(mr_request.repo_dir)
-
-        # 3. Build knowledge indices
-        chroma_client, vector_index = create_vector_index(mr_request.repo_dir)
-        dep_graph = _build_dependency_graph(mr_request.repo_dir)
-
+        mr_request = None
+        container_mgr = None
+        chroma_client = None
         try:
+            # 1. Load MR data
+            mr_request = review_bot.backend_factory(backend)(logger, spec)
+            logger.info(f"Load the Merge Request {spec}")
+            mr_request.load()
+
+            if not mr_request.is_open() or mr_request.is_draft():
+                logger.info("Merge Request skipped (either closed or draft).")
+                return
+
+            # 2. Setup sandbox
+            container_mgr = ContainerManager(logger)
+            if mr_request.repo_dir:
+                container_mgr.setup(mr_request.repo_dir)
+
+            # 3. Build knowledge indices
+            chroma_client, vector_index = create_vector_index(mr_request.repo_dir)
+            dep_graph = _build_dependency_graph(mr_request.repo_dir)
+
             # 4. Assemble prompt and run agents
             secure_base_prompt = build_review_prompt(mr_request)
             agents = create_agents()
@@ -65,15 +68,17 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
             format_and_post_review(logger, mr_request, review_result, post)
         except Exception as e:
             logger.error(f"CRITICAL: Flow failed. Error: {str(e)}")
-            if post:
+            if post and mr_request is not None:
                 mr_request.post_review(
                     "## AI Review Error\n\nThe AI reviewer encountered a fatal structural parsing validation issue."
                 )
         finally:
             if chroma_client is not None:
                 chroma_client.close()
-            container_mgr.cleanup()
-            mr_request.cleanup()
+            if container_mgr is not None:
+                container_mgr.cleanup()
+            if mr_request is not None:
+                mr_request.cleanup()
 
 
 def _build_dependency_graph(repo_dir: str | None):
