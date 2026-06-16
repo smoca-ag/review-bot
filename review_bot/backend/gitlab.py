@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import shutil
@@ -14,6 +15,7 @@ from review_bot.backend.base_backend import BaseBackend
 from review_bot.backend.gitlab_poster import GitlabReviewPoster
 
 logger = logging.getLogger(__name__)
+from review_bot.text_utils import resolve_diff_coordinates
 
 tracer = trace.get_tracer(__name__)
 
