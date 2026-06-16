@@ -42,7 +42,9 @@ def build_vector_index(repo_dir: str, collection) -> int:
     _BATCH = 1000
 
     count = 0
-    batch_ids, batch_docs, batch_meta = [], [], []
+    batch_ids: list[str] = []
+    batch_docs: list[str] = []
+    batch_meta: list[dict[str, str | int]] = []
 
     def _flush() -> None:
         if batch_ids:
