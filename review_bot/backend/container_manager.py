@@ -111,14 +111,27 @@ class ContainerManager:
             finally:
                 self.container_name = None
 
-    def execute_command(self, command: str, timeout: int = 60) -> str:
+    def execute_command(
+        self,
+        command: str,
+        timeout: int = 60,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+    ) -> str:
         """Execute a shell command inside the container."""
         if not self.container_name:
             return "Error: No active container found."
 
         try:
+            cmd: list[str] = ["podman", "exec"]
+            if working_directory:
+                cmd.extend(["--workdir", working_directory])
+            if environment:
+                for key, value in environment.items():
+                    cmd.extend(["--env", f"{key}={value}"])
+            cmd.extend([self.container_name, "/bin/bash", "-c", command])
             output = subprocess.run(
-                ["podman", "exec", self.container_name, "/bin/bash", "-c", command],
+                cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,

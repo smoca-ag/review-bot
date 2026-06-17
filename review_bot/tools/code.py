@@ -33,6 +33,9 @@ def scan_code(
 async def execute_command(
     ctx: RunContext[ReviewDeps],
     command: str,
+    timeout_seconds: int = 60,
+    working_directory: str | None = None,
+    environment: dict[str, str] | None = None,
     start_line: int = 1,
     max_lines: int | None = None,
 ) -> str:
@@ -48,11 +51,19 @@ async def execute_command(
 
     Args:
         command: The shell command to execute.
+        timeout_seconds: Maximum allowed execution time in seconds (default 60).
+        working_directory: The directory to set as the current working directory for command execution.
+        environment: Environment variables to set for the command, as key-value pairs.
         start_line: The line number to start reading output from for pagination.
         max_lines: The maximum number of lines of output to return.
     """
     try:
-        raw = ctx.deps.container_manager.execute_command(command)
+        raw = ctx.deps.container_manager.execute_command(
+            command,
+            timeout=timeout_seconds,
+            working_directory=working_directory,
+            environment=environment,
+        )
         return paginate_text(raw, start_line, max_lines)
     except Exception as e:
         return f"Error executing command: {str(e)}"
