@@ -2,39 +2,22 @@
 
 AI-powered code review bot built with [Pydantic AI](https://ai.pydantic.dev/). Reviews GitLab Merge Requests or local git diffs using a multi-agent pipeline, posts findings as inline comments.
 
-## Prerequisites
-
-- Python 3.11+
-- [Podman](https://podman.io/) (on macOS: `podman machine start`; container built from `review-container/Dockerfile`)
-- For `gitlab` backend: GitLab Personal Access Token with `api` scope
-
-## Development Commands
-
-```bash
-# One-time setup
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-
-# Run tests
-python -m unittest discover -s tests
-
-# Type check
-mypy review_bot/
-```
-
 ## Code Style
 
 - Imports: standard library → third-party → local (`review_bot.*`), each group separated by a blank line
 - Docstrings: Google-style (`Args:`, `Returns:`, `Raises:`)
 - Type hints: Python 3.10+ union syntax (`str | None`) — do NOT use `Optional[str]`
 - Module-level docstring at top of each file describing the module's purpose
+- Build system: `pyproject.toml` only (no `setup.py`, no `setup.cfg`). Dependencies, entry points, and `mypy` config all live there.
+- The codebase is **primarily async** (`asyncio`). CLI entry (`cli.py:main`), the agent pipeline (`pipeline.py`), and tool calls are all `async def`.
 
 ## For AI Assistants
 
-**When you add or remove an environment variable**, update both the `Configuration (Environment Variables)` table below and the `Configuration` section and `.env` example in `README.md`.
+**When you add or remove an environment variable**, update both the `Configuration` table below and the `Configuration` section and `.env` example in `README.md`.
 
-**Read the top-level files first** — they are the table of contents. Only 4 files live at `review_bot/`:
+**When you add or change a key design decision**, add it to the `Key Design Decisions` section below and keep it up to date.
+
+Only 4 files live at `review_bot/` — read them first as a table of contents:
 
 | File | What it tells you |
 |---|---|
@@ -43,10 +26,10 @@ mypy review_bot/
 | `gitlab_webhook.py` | Webhook server and `ReviewManager` queue |
 | `config.py` | Environment config, model resolution, constants |
 
-Every other module lives in a sub-package. Navigate by concern:
-- "How does review flow work?" → `orchestration/orchestrator.py`
-- "What data shapes exist?" → `models/__init__.py`
-- "How do agents talk to the repo?" → `tools/`
+Navigate by concern:
+- "How does review flow work?" → `orchestration/`
+- "What data shapes exist?" → `models/`
+- "How do agents talk to the repo?" → `tools/` → `backend/container_manager.py`
 
 ## Entry Points
 
@@ -55,104 +38,49 @@ Every other module lives in a sub-package. Navigate by concern:
 | `review-bot` | `review_bot.cli:main` | Manual review of a GitLab MR or local git diff |
 | `review-bot-gitlab-webhook` | `review_bot.gitlab_webhook:main` | HTTP webhook server; auto-triggers reviews on GitLab events |
 
-The top-level directory contains only entrypoints: `__init__.py`, `cli.py`, `gitlab_webhook.py`, and the cross-cutting `config.py`. All other modules live in sub-packages.
+## Core Flow
 
-## Core Flow (`review_bot.orchestration.orchestrator:review`)
-
-1. **Backend factory** (`review_bot.__init__.py:backend_factory`) instantiates `Gitlab` or `Git` based on `--backend` flag.
-2. Backend's `load()` fetches MR metadata, diffs, and checks out the repo into a temp directory.
-3. `setup_container()` spins up a Podman sandbox (`review-container/Dockerfile`) with the repo mounted at `/workspace`.
-4. **RAG index** (`review_bot.rag:create_vector_index`): walks the repo, chunks source files, loads into an ephemeral ChromaDB collection for semantic search.
-5. **Agent orchestration** (`review_bot.orchestration.pipeline:run_agent_pipeline`):
-   - 6 sub-agents run **sequentially** (shared prefix cache optimization):
-     - `context` – validates PR description, purpose, test plan
-     - `security` – XSS, SQLi, auth bypass, secrets
-     - `logic` – logic bugs, type errors, unhandled exceptions
-     - `architecture` – SOLID, DRY, coupling violations
-     - `test` – coverage gaps, edge cases, race conditions
-     - `performance` – N+1 queries, memory leaks, Big-O issues
-   - Critic agent consolidates all `SubAgentReport`s → `FinalReviewResult`, deduplicates, drops low-confidence findings (< 0.7), strips positive feedback.
-6. **Output** (`review_bot.orchestration.formatter:format_and_post_review`):
-   - Logs markdown summary to console.
-   - If `--post`, posts a top-level MR comment + inline line comments (confidence ≥ 0.9, non-minor severity) via GitLab Discussions API.
-7. **Cleanup**: kills Podman container, removes temp repo directory.
+1. **Backend loads the diff**: `backend_factory()` creates `Gitlab` or `Git`; `load()` fetches MR metadata + diffs, checks out repo into a temp dir.
+2. **Sandbox + RAG setup**: Podman container starts with repo mounted at `/workspace`. Ephemeral ChromaDB index is built from source files for semantic search.
+3. **Multi-agent pipeline**: 6 sub-agents run sequentially (`context` → `security` → `logic` → `architecture` → `test` → `performance`), then a critic consolidates results, drops confidence < 0.7, and strips positive feedback.
+4. **Output + cleanup**: Markdown summary logged to console; optionally posts top-level comment + inline comments (confidence ≥ 0.9) via GitLab API. Container and temp dir are destroyed.
 
 ## Component Map
 
 ```
 review_bot/
-├── __init__.py            BackendType enum, backend_factory()
-├── cli.py                 CLI entry point, argparse → review()
-├── gitlab_webhook.py      HTTP webhook server, ReviewManager (queue + process pool)
-├── config.py              Model resolution (OpenAI / Anthropic), dotenv, telemetry bootstrap
+├── __init__.py            Public API: BackendType, backend_factory(), review()
+├── cli.py                 CLI entry point
+├── gitlab_webhook.py      Webhook server + ReviewManager queue
+├── config.py              Model resolution, env loading, constants
 │
-├── models/                Pydantic schemas (was models.py)
-│   └── __init__.py        ReviewDeps, LineComment, SubAgentReport, FinalReviewResult, BotImprovementSuggestion, AgentDef
-├── orchestration/         Core review pipeline (was orc/ + review_bot.py + formatter.py)
-│   ├── __init__.py        Re-exports: create_agents, build_review_prompt, run_agent_pipeline, review
-│   ├── orchestrator.py    Top-level review() — container, RAG, agent pipeline, cleanup
-│   ├── pipeline.py        Sub-agent + critic execution, prompt assembly
-│   ├── agents.py          Agent factory — creates fresh pydantic-ai Agent instances
-│   └── formatter.py       Markdown review generation, inline comment posting
-├── agents/                Agent definitions (AgentDef: name, output_type, specialty_prompt)
-│   ├── __init__.py        SUB_AGENTS list + critic_agent_def
-│   ├── prompt.py          Shared system prompt (SHARED_SUB_AGENT_SYSTEM_PROMPT)
-│   ├── context.py         PR description evaluator
-│   ├── security.py        Vulnerability scanner
-│   ├── logic.py           Bug finder
-│   ├── architecture.py    Design reviewer
-│   ├── test.py            QA & coverage reviewer
-│   ├── performance.py     Scalability reviewer
-│   └── critic.py          Consolidator & gatekeeper
-├── backend/               Data access layer
-│   ├── __init__.py        Re-exports all backend classes
-│   ├── base_backend.py    Abstract interface: load, diff, title, description, cleanup, post review
-│   ├── git.py             Local git diff (uses cwd as repo_dir)
-│   ├── gitlab.py          GitLab API: MR fetch, diff, discussions, repo checkout
-│   ├── gitlab_poster.py   Posts top-level & inline review comments to GitLab API
-│   └── container_manager.py  Podman sandbox lifecycle + command execution
-├── tools/                 Agent tools exposed to LLMs via pydantic_ai.Tool
-│   ├── __init__.py        Assembles shared_tools list
-│   ├── diff.py            diff_context — focused diff viewing
-│   ├── files.py           fetch_file_content, list_files
-│   ├── code.py            scan_code, execute_command
-│   ├── graph.py           dependency_graph — query the dep graph
-│   ├── vector.py          vector_search — semantic search via ChromaDB
-│   ├── meta.py            suggest_bot_improvement
-│   └── todo.py            update_todo — track issues through the 4-phase workflow
-├── graph/                 Dependency graph engine (was dependency_graph.py)
-│   ├── __init__.py        Re-exports: DependencyGraph, ModuleInfo, ImportRef, LanguageConfig, build_dependency_graph
-│   ├── model.py           Core data structures
-│   ├── extractors.py      Per-language tree-sitter extractors + import resolvers
-│   └── builder.py         build_dependency_graph, language detection
-├── rag/                   ChromaDB vector index (was rag.py)
-│   └── __init__.py        create_vector_index, build_vector_index
-├── utils/                 Shared utilities (was text_utils.py + diff_utils.py)
-│   ├── text.py            CDATA wrapping, line-number injection, chunking, pagination
-│   └── diff.py            DiffHunk, hunk extraction, file parsing, truncation, coordinate resolution
-├── infra/                 Infrastructure (was telemetry.py)
-│   └── telemetry.py       OpenTelemetry setup (OTLP / console exporter)
+├── models/                Pydantic schemas: ReviewDeps, AgentDef, etc.
+├── orchestration/         Pipeline execution: agents, prompts, formatting, top-level review()
+├── agents/                AgentDef definitions: context, security, logic, architecture, test, performance, critic
+├── backend/               Data access: Git, Gitlab, ContainerManager, GitlabReviewPoster
+├── tools/                 9 pydantic_ai.Tool definitions (diff, files, code, graph, vector, meta, todo)
+├── graph/                 Dependency graph engine via tree-sitter (TS/TSX, Ruby, Swift, Kotlin, Python)
+├── rag/                   Ephemeral ChromaDB vector index (create_vector_index, build_vector_index)
+├── utils/                 Diff utilities (DiffHunk, truncation, coordinate resolution) and text helpers
+└── infra/                 OpenTelemetry setup
 ```
 
 ## Sandboxed Tool Execution
 
-All agent tools delegate to the backend's Podman container (`base_backend.py`):
+All agent tools delegate to `ContainerManager` (`backend/container_manager.py`), which runs commands in the Podman sandbox:
 - `fetch_file_content` → `podman exec cat <file>`
 - `list_files` → `podman exec ls -la`
 - `scan_code` → `podman exec grep -rn`
 - `execute_command` → `podman exec /bin/sh -c "<command>"` (60s timeout)
-- `vector_search` → ChromaDB collection query
-- `suggest_bot_improvement` → appends JSON to `~/.review-bot/improvements.log`
 
-## Agent Tooling (`review_bot.tools`)
+`vector_search` queries ChromaDB locally; `suggest_bot_improvement` appends JSON to `~/.review-bot/improvements.log`.
 
-Tools are defined as `pydantic_ai.Tool` wrapping plain functions. Each receives `RunContext[ReviewDeps]` giving access to `mr_request`, `mr_description`, and `vector_index`.
+Tools receive `RunContext[ReviewDeps]` giving access to `mr_request`, `mr_description`, `container_manager`, and `vector_index`.
 
-## Webhook Server (`review_bot.gitlab_webhook.py`)
+## Webhook Server
 
-- `ThreadingHTTPServer` on configurable `WEBHOOK_HOST:WEBHOOK_PORT`
-- Validates `X-Gitlab-Token` header via HMAC
-- `ReviewManager`: queue + parallel subprocess workers (up to `MAX_PARALLEL_REVIEWS`), cancels in-flight review if new event arrives for same MR
+- `ThreadingHTTPServer` on `WEBHOOK_HOST:WEBHOOK_PORT`; validates `X-Gitlab-Token` via HMAC.
+- `ReviewManager`: queue + `multiprocessing.Process` workers (up to `MAX_PARALLEL_REVIEWS`), cancels in-flight review on new event for same MR.
 - Triggers on: label added, new commits (with label), MR open/reopen (with label). `GITLAB_WEBHOOK_REVIEW_ALL=true` bypasses label requirement.
 
 ## Configuration (Environment Variables)
@@ -163,7 +91,8 @@ Tools are defined as `pydantic_ai.Tool` wrapping plain functions. Each receives 
 | `OPENAI_URL` | OpenAI-compatible endpoint (default `http://localhost:11434/v1`) |
 | `OPENAI_MODEL` | Model name (default `qwen3-coder:30b`) |
 | `OPENAI_API_KEY` | API key for model provider |
-| `ANTHROPIC_DEFAULT_OPUS_MODEL` | If set, use Anthropic provider instead |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` | If set, use Anthropic provider instead. Requires `ANTHROPIC_API_KEY`. |
+| `ANTHROPIC_API_KEY` | API key for Anthropic provider |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP HTTP endpoint for trace export |
 | `DISABLE_TELEMETRY` | Set `true` to disable all tracing |
 | `WEBHOOK_HOST` / `WEBHOOK_PORT` | Webhook server bind address |
@@ -177,17 +106,22 @@ Tools are defined as `pydantic_ai.Tool` wrapping plain functions. Each receives 
 
 ## Testing
 
-```bash
-python -m unittest discover -s tests
-```
+Tests in `tests/` cover `utils`, `graph`, and end-to-end tool execution. CI runs via `.gitlab-ci.yml` with Podman available. `test_tools_e2e.py` requires Podman running.
 
-Tests in `tests/` cover `utils`, `graph`, `orchestration`, and end-to-end tool execution. CI runs via GitLab CI (`.gitlab-ci.yml`) with Podman available.
+**After every change**, run the full suite from the venv:
+
+```bash
+.venv/bin/python -m unittest discover -s tests && .venv/bin/mypy review_bot/
+```
 
 ## Key Design Decisions
 
-- **Sequential sub-agent execution** (not parallel) to maximize LLM prefix cache hits — all agents share the same system prompt, differing only in the appended specialty prompt suffix.
-- **Critic as gatekeeper** — sub-agents are permissive; the critic ruthlessly filters false positives, enforces confidence thresholds, and strips all positive feedback.
-- **Podman sandbox** — agents execute commands in an isolated container to safely run linters, tests, and arbitrary code against the reviewed repo.
+**Keep this section up to date when adding or changing architectural choices.**
+
+- **Sequential sub-agent execution** (not parallel) — all agents share the same system prompt, maximizing LLM prefix cache hits. Only the specialty suffix differs per agent.
+- **Critic as gatekeeper** — sub-agents are permissive; the critic filters false positives (confidence < 0.7), enforces thresholds, and strips all positive feedback.
+- **Podman sandbox** — agents execute commands in an isolated container. `ContainerManager` is the single delegation point for all sandbox access.
 - **Ephemeral RAG** — ChromaDB index is built in-memory per review; no persistent storage.
-- **Diff coordinate resolution** (`review_bot.utils.diff:resolve_diff_coordinates`) maps new-file line numbers back to old-file coordinates for accurate GitLab inline comments, handling renames.
-- **Top-level entrypoints only** — `review_bot/` contains only `__init__.py`, `cli.py`, `gitlab_webhook.py`, and `config.py`. Every implementation detail lives in a sub-package. This follows Clean Code: the top-level is a table of contents; the sub-packages are the chapters.
+- **Async-first** — the entire pipeline (`pipeline.py`), CLI (`cli.py`), and tool functions are `async def`.
+- **Diff coordinate resolution** (`utils/diff.py:resolve_diff_coordinates`) — maps new-file line numbers back to old-file coordinates for accurate GitLab inline comments, handling renames.
+- **Top-level entrypoints only** — `review_bot/` contains only `__init__.py`, `cli.py`, `gitlab_webhook.py`, and `config.py`. All implementation details live in sub-packages.
