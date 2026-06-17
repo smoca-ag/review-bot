@@ -13,10 +13,10 @@ from review_bot.models import ReviewDeps
 from review_bot.rag import build_vector_index
 from review_bot.tools import (
     execute_command,
-    fetch_file_content,
+    read_file,
     list_files,
-    scan_code,
-    vector_search,
+    search_code,
+    semantic_code_search,
 )
 
 logger = logging.getLogger("e2e_test")
@@ -81,13 +81,13 @@ class TestToolsE2E(unittest.IsolatedAsyncioTestCase):
         self.assertIn("pyproject.toml", result)
         self.assertIn("code.py", result)
 
-    def test_e2e_fetch_file_content(self):
-        result = fetch_file_content(self.ctx, "pyproject.toml")
+    def test_e2e_read_file(self):
+        result = read_file(self.ctx, "pyproject.toml")
         self.assertNotIn("Error", result)
         self.assertIn('name = "review_bot"', result)
 
-    def test_e2e_scan_code(self):
-        result = scan_code(self.ctx, "review_bot")
+    def test_e2e_search_code(self):
+        result = search_code(self.ctx, "review_bot")
         self.assertNotIn("Error", result)
         self.assertIn("pyproject.toml", result)
         self.assertIn("review_bot", result)
@@ -98,11 +98,11 @@ class TestToolsE2E(unittest.IsolatedAsyncioTestCase):
         self.assertIn("review_bot", result)
         self.assertIn("pyproject.toml", result)
 
-    def test_e2e_vector_search(self):
+    def test_e2e_semantic_code_search(self):
         if self.indexed_count == 0:
-            self.skipTest("No files were indexed, skipping vector search test.")
+            self.skipTest("No files were indexed, skipping semantic code search test.")
 
-        result = vector_search(self.ctx, "AI Code Review")
+        result = semantic_code_search(self.ctx, "AI Code Review")
         self.assertNotIn("Error", result)
         self.assertNotIn("Vector search is not available", result)
         self.assertIn("File:", result)

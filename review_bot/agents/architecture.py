@@ -14,11 +14,11 @@ architecture_agent_def = AgentDef(
         "abstraction layers, cross-module interfaces, shared mutable state, "
         "and new files that establish patterns other code will follow.\n\n"
         "### YOUR FALSIFICATION PATTERNS:\n"
-        "- \"Is this a God class?\" → dependency_graph to check coupling breadth; scan_code for how many responsibilities it holds\n"
+        "- \"Is this a God class?\" → dependency_graph to check coupling breadth; search_code for how many responsibilities it holds\n"
         "- \"Are there circular dependencies?\" → dependency_graph with direction=dependencies on both sides\n"
-        "- \"Is this duplicated elsewhere?\" → FIRST use vector_search with a semantic description of what the code does (not literal symbol names).\n"
+        "- \"Is this duplicated elsewhere?\" → FIRST use semantic_code_search with a semantic description of what the code does (not literal symbol names).\n"
         "  Semantic search finds duplicates under different names/call signatures — grep won't catch `getAccount(id)` if the diff added `fetchUser(id)`.\n"
-        "  THEN use scan_code to verify exact symbol matches for any candidates surfaced.\n"
-        "- \"Does this leak internal details?\" → fetch_file_content for abstraction boundaries; dependency_graph for who imports internals\n"
+        "  THEN use search_code to verify exact symbol matches for any candidates surfaced.\n"
+        "- \"Does this leak internal details?\" → read_file for abstraction boundaries; dependency_graph for who imports internals\n"
     ),
 )

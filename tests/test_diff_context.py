@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 from pydantic_ai import RunContext
 
 from review_bot.models import ReviewDeps
-from review_bot.tools import diff_context
+from review_bot.tools import view_code_diff_section
 
 
 SAMPLE_DIFF = """\
@@ -61,7 +61,7 @@ def _make_ctx(diff_text: str) -> RunContext:
 class TestDiffContextNoDiff(unittest.TestCase):
     def test_empty_diff(self):
         ctx = _make_ctx("")
-        result = diff_context(ctx)
+        result = view_code_diff_section(ctx)
         self.assertIn("No diff available", result)
 
     def test_none_diff(self):
@@ -76,7 +76,7 @@ class TestDiffContextNoDiff(unittest.TestCase):
             deps=deps, model=DummyModel(), retry=0, tool_name="test",
             usage=None, prompt="test", messages=[],
         )
-        result = diff_context(ctx)
+        result = view_code_diff_section(ctx)
         self.assertIn("No diff available", result)
 
 
@@ -85,12 +85,12 @@ class TestDiffContextAllFiles(unittest.TestCase):
         self.ctx = _make_ctx(SAMPLE_DIFF)
 
     def test_returns_all_files_by_default(self):
-        result = diff_context(self.ctx)
+        result = view_code_diff_section(self.ctx)
         self.assertIn("src/auth.py", result)
         self.assertIn("src/utils.py", result)
 
     def test_contains_diff_markers(self):
-        result = diff_context(self.ctx)
+        result = view_code_diff_section(self.ctx)
         self.assertIn("@@", result)
         self.assertIn("+++ b/", result)
 
@@ -100,16 +100,16 @@ class TestDiffContextFileFilter(unittest.TestCase):
         self.ctx = _make_ctx(SAMPLE_DIFF)
 
     def test_filter_single_file(self):
-        result = diff_context(self.ctx, file_path="src/auth.py")
+        result = view_code_diff_section(self.ctx, file_path="src/auth.py")
         self.assertIn("auth.py", result)
         self.assertNotIn("utils.py", result)
 
     def test_filter_with_leading_slash(self):
-        result = diff_context(self.ctx, file_path="/src/auth.py")
+        result = view_code_diff_section(self.ctx, file_path="/src/auth.py")
         self.assertIn("auth.py", result)
 
     def test_nonexistent_file(self):
-        result = diff_context(self.ctx, file_path="nonexistent.py")
+        result = view_code_diff_section(self.ctx, file_path="nonexistent.py")
         self.assertIn("No diff found", result)
 
 
@@ -118,15 +118,15 @@ class TestDiffContextLineRange(unittest.TestCase):
         self.ctx = _make_ctx(SAMPLE_DIFF)
 
     def test_start_line_filter(self):
-        result = diff_context(self.ctx, file_path="src/auth.py", start_line=14)
+        result = view_code_diff_section(self.ctx, file_path="src/auth.py", start_line=14)
         self.assertIn("auth.py", result)
 
     def test_end_line_filter(self):
-        result = diff_context(self.ctx, file_path="src/auth.py", end_line=12)
+        result = view_code_diff_section(self.ctx, file_path="src/auth.py", end_line=12)
         self.assertIn("auth.py", result)
 
     def test_line_range_no_match(self):
-        result = diff_context(self.ctx, file_path="src/auth.py", start_line=999, end_line=1000)
+        result = view_code_diff_section(self.ctx, file_path="src/auth.py", start_line=999, end_line=1000)
         self.assertIn("No diff found", result)
 
 
@@ -135,12 +135,12 @@ class TestDiffContextContextLines(unittest.TestCase):
         self.ctx = _make_ctx(SAMPLE_DIFF)
 
     def test_zero_context_lines(self):
-        result = diff_context(self.ctx, file_path="src/auth.py", context_lines=0)
+        result = view_code_diff_section(self.ctx, file_path="src/auth.py", context_lines=0)
         self.assertIn("auth.py", result)
 
     def test_large_context_lines(self):
-        result_small = diff_context(self.ctx, file_path="src/auth.py", context_lines=1)
-        result_large = diff_context(self.ctx, file_path="src/auth.py", context_lines=10)
+        result_small = view_code_diff_section(self.ctx, file_path="src/auth.py", context_lines=1)
+        result_large = view_code_diff_section(self.ctx, file_path="src/auth.py", context_lines=10)
         self.assertGreaterEqual(len(result_large), len(result_small))
 
 
@@ -149,11 +149,11 @@ class TestDiffContextPagination(unittest.TestCase):
         self.ctx = _make_ctx(SAMPLE_DIFF)
 
     def test_max_lines(self):
-        result = diff_context(self.ctx, max_lines=2)
+        result = view_code_diff_section(self.ctx, max_lines=2)
         self.assertIn("truncated", result)
 
     def test_start_page(self):
-        result = diff_context(self.ctx, start_page=1, max_lines=100)
+        result = view_code_diff_section(self.ctx, start_page=1, max_lines=100)
         self.assertIn("auth.py", result)
 
 
@@ -173,7 +173,7 @@ class TestDiffContextNewFile(unittest.TestCase):
             "+\n"
         )
         ctx = _make_ctx(diff)
-        result = diff_context(ctx, file_path="new_file.py")
+        result = view_code_diff_section(ctx, file_path="new_file.py")
         self.assertIn("new_file.py", result)
         self.assertIn("hello", result)
 
@@ -190,7 +190,7 @@ class TestDiffContextNewFile(unittest.TestCase):
             "-def goodbye():\n"
         )
         ctx = _make_ctx(diff)
-        result = diff_context(ctx, file_path="old_file.py")
+        result = view_code_diff_section(ctx, file_path="old_file.py")
         self.assertIn("old_file.py", result)
         self.assertIn("goodbye", result)
 

@@ -14,6 +14,6 @@ context_agent_def = AgentDef(
         "### YOUR FALSIFICATION PATTERNS:\n"
         "- \"Is this change undocumented?\" → Compare diff scope against description scope\n"
         "- \"Is there a test plan?\" → Search description for test-related keywords\n"
-        "- \"Is this a breaking change?\" → scan_code or dependency_graph for external consumers of changed interfaces\n"
+        "- \"Is this a breaking change?\" → search_code or dependency_graph for external consumers of changed interfaces\n"
     ),
 )

@@ -8,7 +8,7 @@ This tool leverages AI models via [Pydantic AI](https://ai.pydantic.dev/) to per
   - **Flexible Backends**: Works with remote GitLab MRs (`gitlab` backend) or local `git diff` outputs (`git` backend).
   - **Multi-Agent Pipeline**: Six specialized sub-agents (context, security, logic, architecture, test, performance) review code sequentially, followed by a Critic agent that deduplicates and filters out false positives.
   - **Dependency Graph**: Parses imports and definitions across TypeScript/TSX, Ruby, Swift, Kotlin, and Python using tree-sitter, letting agents trace how changes ripple through the codebase.
-  - **RAG Vector Index**: Builds an ephemeral ChromaDB index of the repository for semantic code search via the `vector_search` tool.
+  - **RAG Vector Index**: Builds an ephemeral ChromaDB index of the repository for semantic code search via the `semantic_code_search` tool.
   - **Structured Review Workflow**: Agents track findings through a 4-phase pipeline (Triage → Hypothesize → Falsify → Self-Critic) to reduce false positives.
   - **Sandboxed Tool Execution**: Agents fetch file contents, list directories, scan code, and execute shell commands inside an isolated Podman container.
   - **Inline Commenting**: For the `gitlab` backend, posts findings as actionable inline comments with precise line-number mapping (respecting renames).
@@ -211,12 +211,12 @@ Each sub-agent has access to these 9 tools:
 
 | Tool | Description |
 |---|---|
-| `fetch_file_content` | Read a file from the sandbox (`podman exec cat`) |
+| `read_file` | Read a file from the sandbox (`podman exec cat`) |
 | `list_files` | List directory contents (`podman exec ls -la`) |
-| `scan_code` | Search code for patterns (`podman exec grep -rn`) |
+| `search_code` | Search code for patterns (`podman exec grep -rn`) |
 | `execute_command` | Run arbitrary shell commands (60s timeout) |
-| `vector_search` | Semantic code search over the ChromaDB RAG index |
-| `diff_context` | Filter and paginate through specific sections of the diff |
+| `semantic_code_search` | Semantic code search over the ChromaDB RAG index |
+| `view_code_diff_section` | Filter and paginate through specific sections of the diff |
 | `dependency_graph` | Query which files import or are imported by a given module |
 | `update_todo` | Track findings through the 4-phase workflow (Triage → Hypothesize → Falsify → Self-Critic) |
 | `suggest_bot_improvement` | Log a tool or prompt improvement suggestion to `~/.review-bot/improvements.log` |
@@ -248,6 +248,20 @@ python -m unittest tests.test_text_utils
 
 # Note: test_tools_e2e.py requires Podman to be running
 ```
+
+### Tool Schema Generation (`test_native_llm_tools/`)
+
+When agent tools use names, descriptions, or parameter schemas that feel unnatural to the model, the model invokes them less effectively. To keep tool schemas aligned with what the model would naturally generate, the scripts in `test_native_llm_tools/` send multiple natural-language descriptions of each tool to the local model and ask it to produce the ideal JSON function definition.
+
+```bash
+# Run all tool schema tests
+./test_native_llm_tools/run_all.sh
+
+# Run a single tool test
+./test_native_llm_tools/test_read_file.sh
+```
+
+Each script outputs 5 candidate JSON schemas. Use the results to adjust function names, docstrings, and parameter signatures in the corresponding `review_bot/tools/*.py` file.
 
 -----
 

@@ -8,10 +8,14 @@ RUN apt-get update && apt-get install -y \
     curl wget git build-essential unzip \
     sqlite3 libsqlite3-dev zlib1g-dev libssl-dev libreadline-dev libyaml-dev \
     python3 python3-pip python3-venv \
-    nodejs npm \
     ruby-full \
     default-jdk maven \
     && gem install rails \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install current stable Node.js LTS from NodeSource
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure git

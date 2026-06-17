@@ -58,7 +58,7 @@ review_bot/
 ├── orchestration/         Pipeline execution: agents, prompts, formatting, top-level review()
 ├── agents/                AgentDef definitions: context, security, logic, architecture, test, performance, critic
 ├── backend/               Data access: Git, Gitlab, ContainerManager, GitlabReviewPoster
-├── tools/                 9 pydantic_ai.Tool definitions: diff_context, fetch_file_content, list_files, scan_code, execute_command, dependency_graph, vector_search, suggest_bot_improvement, update_todo
+├── tools/                 9 pydantic_ai.Tool definitions: view_code_diff_section, read_file, list_files, search_code, execute_command, dependency_graph, semantic_code_search, suggest_bot_improvement, update_todo
 ├── graph/                 Dependency graph engine via tree-sitter (TS/TSX, Ruby, Swift, Kotlin, Python)
 ├── rag/                   Ephemeral ChromaDB vector index (create_vector_index, build_vector_index)
 ├── utils/                 Diff utilities (DiffHunk, truncation, coordinate resolution) and text helpers
@@ -68,12 +68,12 @@ review_bot/
 ## Sandboxed Tool Execution
 
 All agent tools delegate to `ContainerManager` (`backend/container_manager.py`), which runs commands in the Podman sandbox:
-- `fetch_file_content` → `podman exec cat <file>`
+- `read_file` → `podman exec cat <file>`
 - `list_files` → `podman exec ls -la`
-- `scan_code` → `podman exec grep -rn`
+- `search_code` → `podman exec grep -rn`
 - `execute_command` → `podman exec /bin/sh -c "<command>"` (60s timeout)
 
-`vector_search` queries ChromaDB locally; `suggest_bot_improvement` appends JSON to `~/.review-bot/improvements.log`.
+`semantic_code_search` queries ChromaDB locally; `suggest_bot_improvement` appends JSON to `~/.review-bot/improvements.log`.
 
 Tools receive `RunContext[ReviewDeps]` giving access to `mr_request`, `mr_description`, `container_manager`, and `vector_index`.
 
@@ -126,3 +126,4 @@ Tests in `tests/` cover `utils`, `graph`, and end-to-end tool execution. CI runs
 - **Diff coordinate resolution** (`utils/diff.py:resolve_diff_coordinates`) — maps new-file line numbers back to old-file coordinates for accurate GitLab inline comments, handling renames.
 - **Top-level entrypoints only** — `review_bot/` contains only `__init__.py`, `cli.py`, `gitlab_webhook.py`, and `config.py`. Every implementation detail lives in a sub-package. This follows Clean Code: the top-level is a table of contents; the sub-packages are the chapters.
 - **Minimal change preference** — when implementing features, prefer the smallest possible change. When you can achieve the same outcome by removing or simplifying existing code instead of adding new code, do that.
+- **Tool naming by model consensus** — tool function names, descriptions, and parameter signatures are driven by what the local LLM naturally generates. For each tool, `scripts/ask_tool_description.py` sends multiple natural-language descriptions to the model and asks it to produce the ideal JSON function definition. The most frequent model-preferred name is adopted for the Python function. This keeps tool schemas aligned with model expectations, improving tool-call accuracy. The companion shell scripts in `test_native_llm_tools/` run the same methodology in bulk.

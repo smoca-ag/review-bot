@@ -1,21 +1,23 @@
 from pydantic_ai import Tool
 
-from review_bot.tools.code import execute_command, scan_code
-from review_bot.tools.diff import diff_context
-from review_bot.tools.files import fetch_file_content, list_files
-from review_bot.tools.graph import dependency_graph
-from review_bot.tools.meta import suggest_bot_improvement
-from review_bot.tools.todo import update_todo
-from review_bot.tools.vector import vector_search
+from review_bot.tools.execute_command import execute_command
+from review_bot.tools.search_code import search_code
+from review_bot.tools.view_code_diff_section import view_code_diff_section
+from review_bot.tools.list_files import list_files
+from review_bot.tools.read_file import read_file
+from review_bot.tools.dependency_graph import dependency_graph
+from review_bot.tools.suggest_bot_improvement import suggest_bot_improvement
+from review_bot.tools.update_todo import update_todo
+from review_bot.tools.semantic_code_search import semantic_code_search
 
 shared_tools = [
-    Tool(fetch_file_content),
+    Tool(read_file),
     Tool(list_files),
-    Tool(scan_code),
+    Tool(search_code),
     Tool(execute_command),
-    Tool(vector_search),
+    Tool(semantic_code_search),
     Tool(suggest_bot_improvement),
-    Tool(diff_context),
+    Tool(view_code_diff_section),
     Tool(update_todo),
     Tool(dependency_graph),
 ]

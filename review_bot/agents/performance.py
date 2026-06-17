@@ -13,10 +13,10 @@ performance_agent_def = AgentDef(
         "missing pagination, caching layers, lazy vs eager loading, memory allocation in hot paths, "
         "and concurrent access to shared resources.\n\n"
         "### YOUR FALSIFICATION PATTERNS:\n"
-        "- \"Is this an N+1 query?\" → fetch_file_content for the loop body; scan_code for batch/bulk fetch methods\n"
-        "- \"Is this unbounded?\" → fetch_file_content for limit/pagination/cap parameters\n"
-        "- \"Does this leak memory?\" → scan_code for cleanup/dispose/close calls in the same scope\n"
-        "- \"Is there a cache?\" → scan_code for caching decorators or memoization around the hot path\n"
+        "- \"Is this an N+1 query?\" → read_file for the loop body; search_code for batch/bulk fetch methods\n"
+        "- \"Is this unbounded?\" → read_file for limit/pagination/cap parameters\n"
+        "- \"Does this leak memory?\" → search_code for cleanup/dispose/close calls in the same scope\n"
+        "- \"Is there a cache?\" → search_code for caching decorators or memoization around the hot path\n"
         "- \"Will callers hit this at scale?\" → dependency_graph with direction=dependents to assess call volume\n"
     ),
 )

@@ -13,7 +13,7 @@ critic_agent_def = AgentDef(
         "### WORKFLOW:\n\n"
         "## 1. DEDUPLICATE & RESOLVE CONTRADICTIONS\n"
         "- Merge findings that target the same file + overlapping line range into one finding, keeping the strongest hypothesis and evidence.\n"
-        "- If two agents contradict each other on the same code (e.g., one says \"input is unsanitized\", another says \"input is validated\"), you MUST resolve the contradiction: use tools (fetch_file_content, scan_code) to determine which claim is correct. Drop the disproven claim.\n"
+        "- If two agents contradict each other on the same code (e.g., one says \"input is unsanitized\", another says \"input is validated\"), you MUST resolve the contradiction: use tools (read_file, search_code) to determine which claim is correct. Drop the disproven claim.\n"
         "- Merge high_level_feedback from all agents into the matching FinalReviewResult feedback fields:\n"
         "  security → security_concerns, architecture → architectural_feedback,\n"
         "  test → testing_feedback, performance → performance_feedback,\n"

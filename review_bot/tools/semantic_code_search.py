@@ -2,9 +2,9 @@ from review_bot.models import ReviewDeps
 from pydantic_ai import RunContext
 
 
-def vector_search(ctx: RunContext[ReviewDeps], query: str, top_k: int = 5) -> str:
+def semantic_code_search(ctx: RunContext[ReviewDeps], query: str, top_k: int = 5) -> str:
     """
-    Perform a semantic vector search across the codebase.
+    Searches the codebase semantically to find code that is conceptually related to a natural language query.
 
     Use this tool to find conceptually related code chunks when you don't know the exact keyword or file path.
 

@@ -75,7 +75,7 @@ def _in_range(
     return True
 
 
-def diff_context(
+def view_code_diff_section(
     ctx: RunContext[ReviewDeps],
     file_path: str | None = None,
     start_line: int | None = None,
