@@ -32,6 +32,8 @@ mypy review_bot/
 
 ## For AI Assistants
 
+**When you add or remove an environment variable**, update both the `Configuration (Environment Variables)` table below and the `Configuration` section and `.env` example in `README.md`.
+
 **Read the top-level files first** — they are the table of contents. Only 4 files live at `review_bot/`:
 
 | File | What it tells you |
@@ -150,7 +152,7 @@ Tools are defined as `pydantic_ai.Tool` wrapping plain functions. Each receives 
 
 - `ThreadingHTTPServer` on configurable `WEBHOOK_HOST:WEBHOOK_PORT`
 - Validates `X-Gitlab-Token` header via HMAC
-- `ReviewManager`: single-worker queue; cancels in-flight review if new event arrives for same MR
+- `ReviewManager`: queue + parallel subprocess workers (up to `MAX_PARALLEL_REVIEWS`), cancels in-flight review if new event arrives for same MR
 - Triggers on: label added, new commits (with label), MR open/reopen (with label). `GITLAB_WEBHOOK_REVIEW_ALL=true` bypasses label requirement.
 
 ## Configuration (Environment Variables)
@@ -171,6 +173,7 @@ Tools are defined as `pydantic_ai.Tool` wrapping plain functions. Each receives 
 | `CONFIDENCE_THRESHOLD` | Min confidence for inline comments (default `0.9`) |
 | `AGENT_REQUEST_LIMIT` | Max API requests per agent run (default `200`) |
 | `MAX_LINES` / `MAX_LINE_LENGTH` | Diff truncation limits (default `200` / `150`) |
+| `MAX_PARALLEL_REVIEWS` | Max concurrent reviews for webhook server (default `3`, `0`=unlimited) |
 
 ## Testing
 

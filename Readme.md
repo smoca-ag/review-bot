@@ -83,6 +83,7 @@ This tool leverages AI models via [Pydantic AI](https://ai.pydantic.dev/) to per
     # WEBHOOK_PORT="8080"
     # GITLAB_WEBHOOK_LABEL="ai-review-requested"
     # GITLAB_WEBHOOK_REVIEW_ALL="false"
+    # MAX_PARALLEL_REVIEWS="3"    # Max concurrent reviews, 0 = unlimited
     ```
 
 -----
@@ -108,6 +109,7 @@ The script uses the following environment variables:
   - `WEBHOOK_PORT` (Optional): Webhook server port. **Defaults to** `8080`.
   - `GITLAB_WEBHOOK_LABEL` (Optional): Label that triggers a review. **Defaults to** `ai-review-requested`.
   - `GITLAB_WEBHOOK_REVIEW_ALL` (Optional): If `true`, triggers on all MR opens and new commits regardless of label. **Defaults to** `false`.
+  - `MAX_PARALLEL_REVIEWS` (Optional): Maximum concurrent reviews the webhook server will run. `0` means unlimited. **Defaults to** `3`.
 
 -----
 

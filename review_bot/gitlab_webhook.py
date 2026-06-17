@@ -8,6 +8,7 @@ import os
 import signal as signal_module
 import sys
 import threading
+import time
 
 from opentelemetry import trace
 
@@ -25,6 +26,7 @@ PORT = None
 GITLAB_WEBHOOK_LABEL = None
 GITLAB_WEBHOOK_REVIEW_ALL = None
 GITLAB_WEBHOOK_TOKEN = None
+MAX_PARALLEL_REVIEWS = None
 
 
 def _load_config():
@@ -34,7 +36,8 @@ def _load_config():
         PORT, \
         GITLAB_WEBHOOK_LABEL, \
         GITLAB_WEBHOOK_REVIEW_ALL, \
-        GITLAB_WEBHOOK_TOKEN
+        GITLAB_WEBHOOK_TOKEN, \
+        MAX_PARALLEL_REVIEWS
     HOST = os.environ.get("WEBHOOK_HOST", "0.0.0.0")
     PORT = int(os.environ.get("WEBHOOK_PORT", "8080"))
     GITLAB_WEBHOOK_LABEL = os.environ.get("GITLAB_WEBHOOK_LABEL", "ai-review-requested")
@@ -42,98 +45,114 @@ def _load_config():
         os.environ.get("GITLAB_WEBHOOK_REVIEW_ALL", "false").lower() == "true"
     )
     GITLAB_WEBHOOK_TOKEN = os.environ.get("GITLAB_WEBHOOK_TOKEN")
+    MAX_PARALLEL_REVIEWS = int(os.environ.get("MAX_PARALLEL_REVIEWS", "3"))
 
 
 # --- The function to run in a separate process ---
 
 
-def start_ai_review(mr_id, mr_url):
+def start_ai_review(mr_url):
     """
-    This function is your target. It runs in its own process.
-    It now receives the MR ID and URL directly.
+    This function runs in its own process.
+    It receives the MR URL for both identification and the review spec.
     """
     try:
-        logger.info(f"Processing URL: {mr_url}")
-        # Simulate a long-running task (e.g., API calls, code analysis)
+        logger.info(f"Processing {mr_url}")
         asyncio.run(review(mr_url, backend="gitlab", post=True))
-        logger.info(f"Finished URL: {mr_url}")
+        logger.info(f"Finished {mr_url}")
     except Exception as e:
-        logger.error(f"ERROR during AI review for MR !{mr_url}: {e}", exc_info=True)
+        logger.error(f"ERROR during AI review for {mr_url}: {e}", exc_info=True)
 
 
 class ReviewManager:
     """
-    Manages a queue of merge requests to review, ensuring only one runs at a time.
-    If an update comes for a running or queued MR, the old one is canceled/replaced.
+    Manages a queue of merge requests to review, running up to max_parallel
+    reviews concurrently.  If an update arrives for an MR that is already
+    running or queued, the old entry is cancelled and replaced.
     """
 
-    def __init__(self):
-        self.queue = []  # List of (mr_id, mr_url)
+    def __init__(self, max_parallel: int = 3):
+        self.queue: list[str] = []
+        self.active: dict[str, multiprocessing.Process] = {}
         self.lock = threading.Lock()
         self.condition = threading.Condition(self.lock)
-        self.active_process = None
-        self.active_mr_id = None
+        self.max_parallel = max_parallel
         self.worker_thread = threading.Thread(target=self._worker, daemon=True)
         self.worker_thread.start()
+        self.reaper_thread = threading.Thread(target=self._reaper, daemon=True)
+        self.reaper_thread.start()
 
-    def submit(self, mr_id, mr_url):
+    def submit(self, mr_url: str) -> None:
+        # Kill running process for this MR without holding the lock
+        process_to_kill = None
         with self.condition:
-            if self.active_mr_id == mr_id:
-                # Cancel the currently running process
-                logger.info(f"Canceling currently running review for MR !{mr_id}")
-                if self.active_process and self.active_process.is_alive():
-                    try:
-                        os.kill(self.active_process.pid, signal_module.SIGTERM)
-                        self.active_process.join(timeout=15)
-                    except (ProcessLookupError, OSError):
-                        pass
-                    if self.active_process.is_alive():
-                        self.active_process.terminate()
-                self.active_process = None
-                self.active_mr_id = None
+            if mr_url in self.active:
+                process_to_kill = self.active.pop(mr_url)
 
-            # Remove from queue if it's already there
-            original_len = len(self.queue)
-            self.queue = [(i, u) for i, u in self.queue if i != mr_id]
-            if len(self.queue) < original_len:
-                logger.info(f"Removed existing queued review for MR !{mr_id}")
+        if process_to_kill and process_to_kill.is_alive():
+            logger.info(f"Cancelling in-progress review for {mr_url}")
+            self._kill_process(process_to_kill)
 
-            # Add to queue
-            self.queue.append((mr_id, mr_url))
-            logger.info(
-                f"Queued AI review for MR !{mr_id}. Queue size: {len(self.queue)}"
-            )
-            self.condition.notify()
+        with self.condition:
+            # Replace any queued entry for this MR
+            if mr_url in self.queue:
+                self.queue.remove(mr_url)
+                logger.info(f"Replaced queued review for {mr_url}")
 
-    def _worker(self):
+            self.queue.append(mr_url)
+            logger.info(f"Queued review for {mr_url}. Queue: {len(self.queue)}, Active: {len(self.active)}")
+            self.condition.notify_all()
+
+    def _kill_process(self, p: multiprocessing.Process) -> None:
+        if p.pid is None:
+            return
+        try:
+            os.kill(p.pid, signal_module.SIGTERM)
+            p.join(timeout=15)
+        except (ProcessLookupError, OSError):
+            return
+        if p.is_alive():
+            p.terminate()
+
+    def _worker(self) -> None:
         while True:
             with self.condition:
-                while not self.queue:
+                while True:
+                    if self.queue and self._has_capacity():
+                        break
                     self.condition.wait()
-                mr_id, mr_url = self.queue.pop(0)
 
-                logger.info(f"Starting AI review for MR !{mr_id} from queue...")
+                mr_url = self.queue.pop(0)
+
+                logger.info(f"Starting review for {mr_url}...")
                 p = multiprocessing.Process(
                     target=start_ai_review,
-                    args=(
-                        mr_id,
-                        mr_url,
-                    ),
-                    name=f"AI-Review-MR-{mr_id}",
+                    args=(mr_url,),
+                    name=f"AI-Review-{_sanitize_process_name(mr_url)}",
                 )
-                self.active_process = p
-                self.active_mr_id = mr_id
                 p.daemon = True
                 p.start()
+                self.active[mr_url] = p
 
-            # Wait for process to finish outside the lock
-            p.join()
-
+    def _reaper(self) -> None:
+        while True:
             with self.condition:
-                # Only clear if it hasn't been overwritten by a cancellation
-                if self.active_process == p:
-                    self.active_process = None
-                    self.active_mr_id = None
+                finished = [url for url, p in self.active.items() if not p.is_alive()]
+                for url in finished:
+                    del self.active[url]
+                    logger.info(f"Review completed for {url}")
+                if finished:
+                    self.condition.notify_all()
+            time.sleep(0.5)
+
+    def _has_capacity(self) -> bool:
+        if self.max_parallel <= 0:
+            return True
+        return len(self.active) < self.max_parallel
+
+
+def _sanitize_process_name(url: str) -> str:
+    return url.rsplit("/", 1)[-1]
 
 
 # Global manager instance, initialized in main()
@@ -239,7 +258,6 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
 
         labels = attributes.get("labels", [])
         label_names = [label["title"] for label in labels]
-        mr_id = attributes.get("iid", "N/A")
         mr_url = attributes.get("url", "N/A")
 
         # Determine the reason for the trigger
@@ -261,7 +279,7 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
                 is_label_added = True
 
         logger.info(
-            f"Received update for MR !{mr_id}. Action: {mr_action}, New Commit: {is_new_commit}, Label Added: {is_label_added}"
+            f"Received update for {mr_url}. Action: {mr_action}, New Commit: {is_new_commit}, Label Added: {is_label_added}"
         )
 
         trigger_review = False
@@ -270,47 +288,47 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
             if mr_action in ["open", "reopen"] or is_new_commit:
                 trigger_review = True
                 logger.info(
-                    f"Review all flag is set. Triggering on {mr_action}/new_commit for MR !{mr_id}."
+                    f"Review all flag is set. Triggering on {mr_action}/new_commit for {mr_url}."
                 )
             else:
                 logger.info(
-                    f"Review all flag is set, but ignoring non-code update for MR !{mr_id}."
+                    f"Review all flag is set, but ignoring non-code update for {mr_url}."
                 )
         else:
             if GITLAB_WEBHOOK_LABEL in label_names:
                 if is_label_added:
                     trigger_review = True
                     logger.info(
-                        f"'{GITLAB_WEBHOOK_LABEL}' label was just added to MR !{mr_id}."
+                        f"'{GITLAB_WEBHOOK_LABEL}' label was just added to {mr_url}."
                     )
                 elif is_new_commit:
                     trigger_review = True
                     logger.info(
-                        f"New commits pushed to MR !{mr_id} with '{GITLAB_WEBHOOK_LABEL}' label."
+                        f"New commits pushed to {mr_url} with '{GITLAB_WEBHOOK_LABEL}' label."
                     )
                 elif mr_action in ["open", "reopen"]:
                     trigger_review = True
                     logger.info(
-                        f"MR !{mr_id} opened/reopened with '{GITLAB_WEBHOOK_LABEL}' label."
+                        f"{mr_url} opened/reopened with '{GITLAB_WEBHOOK_LABEL}' label."
                     )
                 else:
                     logger.info(
-                        f"Ignoring update to MR !{mr_id} (label present, but no new commits)."
+                        f"Ignoring update to {mr_url} (label present, but no new commits)."
                     )
             else:
                 logger.info(
-                    f"No '{GITLAB_WEBHOOK_LABEL}' label found for MR !{mr_id} and review all is disabled."
+                    f"No '{GITLAB_WEBHOOK_LABEL}' label found for {mr_url} and review all is disabled."
                 )
 
         if trigger_review:
-            if mr_url == "N/A" or mr_id == "N/A":
+            if not mr_url or mr_url == "N/A":
                 logger.error(
-                    "Could not find MR ID or URL for incoming event. Aborting review."
+                    "Could not find MR URL for incoming event. Aborting review."
                 )
                 return
 
             if review_manager:
-                review_manager.submit(mr_id, mr_url)
+                review_manager.submit(mr_url)
             else:
                 logger.error("Review manager is not initialized.")
 
@@ -362,7 +380,7 @@ def main():
         return 1  # Return 1 for failure
 
     global review_manager
-    review_manager = ReviewManager()
+    review_manager = ReviewManager(max_parallel=MAX_PARALLEL_REVIEWS)
 
     httpd = None  # Initialize to None for the finally block
     shutdown_event = threading.Event()
