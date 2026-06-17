@@ -41,7 +41,7 @@ Navigate by concern:
 ## Core Flow
 
 1. **Backend loads the diff**: `backend_factory()` creates `Gitlab` or `Git`; `load()` fetches MR metadata + diffs, checks out repo into a temp dir.
-2. **Sandbox + RAG setup**: Podman container starts with repo mounted at `/workspace`. Ephemeral ChromaDB index is built from source files for semantic search.
+2. **Orchestration**: `orchestration/orchestrator.py:review()` sets up the sandbox + RAG, then runs the multi-agent pipeline.
 3. **Multi-agent pipeline**: 6 sub-agents run sequentially (`context` → `security` → `logic` → `architecture` → `test` → `performance`), then a critic consolidates results, drops confidence < 0.7, and strips positive feedback.
 4. **Output + cleanup**: Markdown summary logged to console; optionally posts top-level comment + inline comments (confidence ≥ 0.9) via GitLab API. Container and temp dir are destroyed.
 
@@ -54,11 +54,11 @@ review_bot/
 ├── gitlab_webhook.py      Webhook server + ReviewManager queue
 ├── config.py              Model resolution, env loading, constants
 │
-├── models/                Pydantic schemas: ReviewDeps, AgentDef, etc.
+├── models/                ReviewDeps (dataclass), AgentDef (dataclass), Pydantic schemas (LineComment, SubAgentReport, etc.)
 ├── orchestration/         Pipeline execution: agents, prompts, formatting, top-level review()
 ├── agents/                AgentDef definitions: context, security, logic, architecture, test, performance, critic
 ├── backend/               Data access: Git, Gitlab, ContainerManager, GitlabReviewPoster
-├── tools/                 9 pydantic_ai.Tool definitions (diff, files, code, graph, vector, meta, todo)
+├── tools/                 9 pydantic_ai.Tool definitions: diff_context, fetch_file_content, list_files, scan_code, execute_command, dependency_graph, vector_search, suggest_bot_improvement, update_todo
 ├── graph/                 Dependency graph engine via tree-sitter (TS/TSX, Ruby, Swift, Kotlin, Python)
 ├── rag/                   Ephemeral ChromaDB vector index (create_vector_index, build_vector_index)
 ├── utils/                 Diff utilities (DiffHunk, truncation, coordinate resolution) and text helpers
@@ -122,6 +122,7 @@ Tests in `tests/` cover `utils`, `graph`, and end-to-end tool execution. CI runs
 - **Critic as gatekeeper** — sub-agents are permissive; the critic filters false positives (confidence < 0.7), enforces thresholds, and strips all positive feedback.
 - **Podman sandbox** — agents execute commands in an isolated container. `ContainerManager` is the single delegation point for all sandbox access.
 - **Ephemeral RAG** — ChromaDB index is built in-memory per review; no persistent storage.
-- **Async-first** — the entire pipeline (`pipeline.py`), CLI (`cli.py`), and tool functions are `async def`.
+- **Async-first** — the entire pipeline (`orchestration/pipeline.py`), CLI (`cli.py`), and tool functions are `async def`.
 - **Diff coordinate resolution** (`utils/diff.py:resolve_diff_coordinates`) — maps new-file line numbers back to old-file coordinates for accurate GitLab inline comments, handling renames.
-- **Top-level entrypoints only** — `review_bot/` contains only `__init__.py`, `cli.py`, `gitlab_webhook.py`, and `config.py`. All implementation details live in sub-packages.
+-- **Top-level entrypoints only** — `review_bot/` contains only `__init__.py`, `cli.py`, `gitlab_webhook.py`, and `config.py`. Every implementation detail lives in a sub-package. This follows Clean Code: the top-level is a table of contents; the sub-packages are the chapters.
+- **Minimal change preference** — when implementing features, prefer the smallest possible change. When you can achieve the same outcome by removing or simplifying existing code instead of adding new code, do that.
