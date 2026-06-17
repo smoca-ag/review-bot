@@ -8,7 +8,6 @@ variables:
 cache:
   paths:
     - .cache/pip
-    - .venv/
 
 typecheck:
   image: python:3.11
