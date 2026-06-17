@@ -13,6 +13,7 @@ from review_bot.models import ReviewDeps
 from review_bot.rag import build_vector_index
 from review_bot.tools import (
     execute_command,
+    glob,
     read_file,
     list_files,
     search_code,
@@ -91,6 +92,21 @@ class TestToolsE2E(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Error", result)
         self.assertIn("pyproject.toml", result)
         self.assertIn("review_bot", result)
+
+    def test_e2e_glob_py_files(self):
+        result = glob(self.ctx, "**/*.py")
+        self.assertNotIn("Error", result)
+        self.assertIn("review_bot", result)
+        self.assertIn(".py", result)
+
+    def test_e2e_glob_single_pattern(self):
+        result = glob(self.ctx, "pyproject.toml")
+        self.assertNotIn("Error", result)
+        self.assertIn("pyproject.toml", result)
+
+    def test_e2e_glob_no_match(self):
+        result = glob(self.ctx, "*.nonexistent")
+        self.assertIn("No files matched", result)
 
     async def test_e2e_execute_command(self):
         result = await execute_command(self.ctx, "ls -la")

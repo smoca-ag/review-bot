@@ -215,6 +215,39 @@ class ContainerManager:
             err_output = e.stdout.strip() if e.stdout else "(no output)"
             return f"Error listing files: {err_output}"
 
+    def glob_files(self, pattern: str) -> str:
+        """Find files matching a glob pattern inside the container."""
+        if not self.container_name:
+            return "Error: No active container found."
+
+        try:
+            output = subprocess.run(
+                [
+                    "podman",
+                    "exec",
+                    "-w",
+                    "/workspace",
+                    self.container_name,
+                    "find",
+                    ".",
+                    "-path",
+                    f"./{pattern}",
+                    "-type",
+                    "f",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=30,
+                check=True,
+            )
+            return output.stdout or "No files matched."
+        except subprocess.TimeoutExpired:
+            return "Error: Command timed out after 30 seconds."
+        except subprocess.CalledProcessError as e:
+            err_output = e.stdout.strip() if e.stdout else "(no output)"
+            return f"Error globbing files: {err_output}"
+
     def scan_code(self, pattern: str, path: str = ".") -> str:
         """Scan the repository for a pattern using grep inside the container."""
         if not self.container_name:

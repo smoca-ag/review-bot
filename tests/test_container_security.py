@@ -19,6 +19,9 @@ def _podman_available() -> bool:
 
 @unittest.skipUnless(_podman_available(), "podman not available")
 class TestContainerSecurity(unittest.TestCase):
+    container_mgr: ContainerManager
+    tmpdir: tempfile.TemporaryDirectory
+
     @classmethod
     def setUpClass(cls):
         cls.tmpdir = tempfile.TemporaryDirectory()

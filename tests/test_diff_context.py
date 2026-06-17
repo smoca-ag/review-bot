@@ -2,6 +2,8 @@ import unittest
 from unittest.mock import MagicMock
 
 from pydantic_ai import RunContext
+from pydantic_ai.models import Model
+from pydantic_ai.usage import RunUsage
 
 from review_bot.models import ReviewDeps
 from review_bot.tools import view_code_diff_section
@@ -34,7 +36,7 @@ index 1111111..2222222 100644
 """
 
 
-def _make_ctx(diff_text: str) -> RunContext:
+def _make_ctx(diff_text: str):
     backend = MagicMock()
     backend.diff.return_value = diff_text
     deps = ReviewDeps(
@@ -44,15 +46,12 @@ def _make_ctx(diff_text: str) -> RunContext:
         vector_index=None,
     )
 
-    class DummyModel:
-        pass
-
     return RunContext(
         deps=deps,
-        model=DummyModel(),
+        model=MagicMock(spec=Model),
         retry=0,
         tool_name="test",
-        usage=None,
+        usage=RunUsage(),
         prompt="test",
         messages=[],
     )
@@ -69,12 +68,9 @@ class TestDiffContextNoDiff(unittest.TestCase):
         backend.diff.return_value = None
         deps = ReviewDeps(mr_request=backend, container_manager=MagicMock(), mr_description="test", vector_index=None)
 
-        class DummyModel:
-            pass
-
         ctx = RunContext(
-            deps=deps, model=DummyModel(), retry=0, tool_name="test",
-            usage=None, prompt="test", messages=[],
+            deps=deps, model=MagicMock(spec=Model), retry=0, tool_name="test",
+            usage=RunUsage(), prompt="test", messages=[],
         )
         result = view_code_diff_section(ctx)
         self.assertIn("No diff available", result)
