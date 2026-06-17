@@ -124,5 +124,5 @@ Tests in `tests/` cover `utils`, `graph`, and end-to-end tool execution. CI runs
 - **Ephemeral RAG** — ChromaDB index is built in-memory per review; no persistent storage.
 - **Async-first** — the entire pipeline (`orchestration/pipeline.py`), CLI (`cli.py`), and tool functions are `async def`.
 - **Diff coordinate resolution** (`utils/diff.py:resolve_diff_coordinates`) — maps new-file line numbers back to old-file coordinates for accurate GitLab inline comments, handling renames.
--- **Top-level entrypoints only** — `review_bot/` contains only `__init__.py`, `cli.py`, `gitlab_webhook.py`, and `config.py`. Every implementation detail lives in a sub-package. This follows Clean Code: the top-level is a table of contents; the sub-packages are the chapters.
+- **Top-level entrypoints only** — `review_bot/` contains only `__init__.py`, `cli.py`, `gitlab_webhook.py`, and `config.py`. Every implementation detail lives in a sub-package. This follows Clean Code: the top-level is a table of contents; the sub-packages are the chapters.
 - **Minimal change preference** — when implementing features, prefer the smallest possible change. When you can achieve the same outcome by removing or simplifying existing code instead of adding new code, do that.
