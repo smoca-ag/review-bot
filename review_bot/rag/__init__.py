@@ -57,8 +57,7 @@ def build_vector_index(repo_dir: str, collection) -> int:
         dirs[:] = [
             d
             for d in dirs
-            if d not in EXCLUDE_DIRS
-            and not (EXCLUDE_DOT_DIRS and d.startswith("."))
+            if d not in EXCLUDE_DIRS and not (EXCLUDE_DOT_DIRS and d.startswith("."))
         ]
         for f in files:
             ext = os.path.splitext(f)[1].lower()
@@ -84,5 +83,6 @@ def build_vector_index(repo_dir: str, collection) -> int:
                 count += len(chunks)
                 if count >= _BATCH:
                     _flush()
+                    count = 0
     _flush()
     return count

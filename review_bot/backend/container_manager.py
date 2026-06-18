@@ -216,11 +216,20 @@ class ContainerManager:
             return f"Error listing files: {err_output}"
 
     def glob_files(self, pattern: str) -> str:
-        """Find files matching a glob pattern inside the container."""
+        """Find files matching a glob pattern inside the container.
+
+        Uses Python's ``glob.glob(recursive=True)`` which correctly supports
+        ``**`` for recursive directory matching.
+        """
         if not self.container_name:
             return "Error: No active container found."
 
         try:
+            script = (
+                "import glob, sys\n"
+                "for f in sorted(glob.glob(sys.argv[1], recursive=True)):\n"
+                "    print(f)"
+            )
             output = subprocess.run(
                 [
                     "podman",
@@ -228,12 +237,10 @@ class ContainerManager:
                     "-w",
                     "/workspace",
                     self.container_name,
-                    "find",
-                    ".",
-                    "-path",
-                    f"./{pattern}",
-                    "-type",
-                    "f",
+                    "python3",
+                    "-c",
+                    script,
+                    pattern,
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
