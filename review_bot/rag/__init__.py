@@ -42,6 +42,7 @@ def build_vector_index(repo_dir: str, collection) -> int:
     _BATCH = 1000
 
     count = 0
+    total = 0
     batch_ids: list[str] = []
     batch_docs: list[str] = []
     batch_meta: list[dict[str, str | int]] = []
@@ -80,9 +81,11 @@ def build_vector_index(repo_dir: str, collection) -> int:
                     {"file": rel_path, "lines": start_line}
                     for _, _, start_line in chunks
                 )
-                count += len(chunks)
+                added = len(chunks)
+                count += added
+                total += added
                 if count >= _BATCH:
                     _flush()
                     count = 0
     _flush()
-    return count
+    return total
