@@ -21,6 +21,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
 # Configure git
 RUN git config --global --add safe.directory /workspace
 
+# RTK (Qwen3.8-Flash-Next likes it)
+
+RUN RTK_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+
 # Android SDK
 ENV ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk

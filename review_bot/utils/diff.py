@@ -172,6 +172,75 @@ def truncate_large_diff_files(
     return "".join(result_parts)
 
 
+def diff_line_mapping(
+    diff_response: str | None, target_new_path: str, target_new_line: int
+) -> tuple[bool, int | None]:
+    """Map a new-file line number within one file's section of a diff.
+
+    Unlike resolve_diff_coordinates, this distinguishes lines that are part
+    of a hunk from lines that do not appear in the diff at all, which is
+    needed to detect comment positions GitLab cannot render.
+
+    Args:
+        diff_response: Raw unified diff text.
+        target_new_path: New-side file path to inspect.
+        target_new_line: New-file line number to look up.
+
+    Returns:
+        A tuple ``(in_diff, old_line)``. ``in_diff`` is True when the line
+        appears in any hunk as an added or context line. ``old_line`` is the
+        corresponding old-file line for context lines, and None for added
+        lines or when the line is not part of the diff.
+    """
+    if not diff_response:
+        return False, None
+
+    lines = diff_response.splitlines()
+    target_new_path = target_new_path.lstrip("/") if target_new_path else ""
+    num_lines = len(lines)
+
+    i = 0
+    while i < num_lines and not (
+        lines[i].startswith("+++ b/") and lines[i][6:].lstrip("/") == target_new_path
+    ):
+        i += 1
+    if i >= num_lines:
+        return False, None
+
+    old_line_counter = 0
+    new_line_counter = 0
+    while i < num_lines and not lines[i].startswith("diff --git"):
+        line = lines[i]
+        i += 1
+        if line.startswith("@@"):
+            match = _HUNK_RE.match(line)
+            if not match:
+                continue
+            old_line_counter = int(match.group(1))
+            new_line_counter = int(match.group(3))
+            continue
+        if line.startswith("\\") or new_line_counter == 0:
+            continue
+        if line == "":
+            # Some diff renderers strip the leading space of empty context
+            # lines; they still occupy old and new line positions.
+            line = " "
+        if new_line_counter == target_new_line:
+            if line.startswith("+"):
+                return True, None
+            if line.startswith(" "):
+                return True, old_line_counter
+        if line.startswith("+"):
+            new_line_counter += 1
+        elif line.startswith("-"):
+            old_line_counter += 1
+        elif line.startswith(" "):
+            old_line_counter += 1
+            new_line_counter += 1
+
+    return False, None
+
+
 def resolve_diff_coordinates(
     diff_response: str | None, target_new_path: str, target_new_line: int
 ) -> tuple[str, int | None]:
@@ -227,6 +296,10 @@ def resolve_diff_coordinates(
 
         if line.startswith("\\"):
             continue
+        if line == "" and new_line_counter > 0:
+            # Some diff renderers strip the leading space of empty context
+            # lines; they still occupy old and new line positions.
+            line = " "
 
         if new_line_counter == target_new_line:
             if line.startswith("+"):

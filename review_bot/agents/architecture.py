@@ -12,7 +12,11 @@ architecture_agent_def = AgentDef(
         "### YOUR RISK TRIAGE FOCUS:\n"
         "Prioritize sections that touch: class responsibilities (God classes), dependency direction, "
         "abstraction layers, cross-module interfaces, shared mutable state, "
-        "and new files that establish patterns other code will follow.\n\n"
+        "and new files that establish patterns other code will follow.\n"
+        "Also apply a maintainability lens: flag logic complex enough that a competent reader would "
+        "struggle to reason about it in 12 months without the diff context, behavior that is "
+        "non-obvious or surprising to a caller reading only the signature, and dependencies (libraries, "
+        "services, or internal modules) that lock in future cost or are hard to replace.\n\n"
         "### YOUR FALSIFICATION PATTERNS:\n"
         "- \"Is this a God class?\" → dependency_graph to check coupling breadth; search_code for how many responsibilities it holds\n"
         "- \"Are there circular dependencies?\" → dependency_graph with direction=dependencies on both sides\n"
@@ -20,5 +24,9 @@ architecture_agent_def = AgentDef(
         "  Semantic search finds duplicates under different names/call signatures — grep won't catch `getAccount(id)` if the diff added `fetchUser(id)`.\n"
         "  THEN use search_code to verify exact symbol matches for any candidates surfaced.\n"
         "- \"Does this leak internal details?\" → read_file for abstraction boundaries; dependency_graph for who imports internals\n"
+        "- \"Will this be hard to understand in a year?\" → read_file the function without the diff and ask whether its intent is "
+        "recoverable from signature + body alone. If a reader would need git blame or the author to explain it, flag it.\n"
+        "- \"Does this surprise its callers?\" → read_file the public signature; if observable behavior contradicts the signature's "
+        "implied contract (hidden side effects, unlogged state mutation, undocumented throws), flag it.\n"
     ),
 )
