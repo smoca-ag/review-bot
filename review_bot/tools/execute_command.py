@@ -21,6 +21,13 @@ async def execute_command(
 
     You are strongly encouraged to use this tool to verify your findings.
     For example: `pytest tests/`, `mypy src/`, `npm run test`, `node -e "..."`, `python -c "..."`.
+    Use `rg <pattern> [path]` (ripgrep) for fast regex code searches, e.g.
+    `rg 'foo|bar' src/` — full regex including alternation is supported.
+
+    Long builds or test suites: start them in the background writing to a log
+    file (e.g. `nohup make build > /tmp/build.log 2>&1 &`) and then poll the
+    log with short commands like `tail -50 /tmp/build.log` instead of sleeping
+    or blocking for the whole duration.
 
     Args:
         command: The shell command to execute.

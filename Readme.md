@@ -213,8 +213,8 @@ Each sub-agent has access to these 9 tools:
 |---|---|
 | `read_file` | Read a file from the sandbox (`podman exec cat`) |
 | `list_files` | List directory contents (`podman exec ls -la`) |
-| `search_code` | Search code for patterns (`podman exec grep -rn`) |
-| `execute_command` | Run arbitrary shell commands (60s timeout) |
+| `glob` | Find files matching a glob pattern, incl. brace alternation (`**/*.{test,spec}.ts`) |
+| `execute_command` | Run arbitrary shell commands (60s timeout); use `rg` (ripgrep) for regex code search |
 | `semantic_code_search` | Semantic code search over the ChromaDB RAG index |
 | `view_code_diff_section` | Filter and paginate through specific sections of the diff |
 | `dependency_graph` | Query which files import or are imported by a given module |

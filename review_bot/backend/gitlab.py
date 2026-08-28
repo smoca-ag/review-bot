@@ -280,12 +280,14 @@ class Gitlab(BaseBackend):
                         cwd=repo_dir,
                     )
 
+                    # Depth 50 keeps recent parent commits so agents can diff
+                    # against the MR head's parents, not just the target branch.
                     subprocess.run(
                         [
                             "git",
                             "fetch",
                             "--depth",
-                            "1",
+                            "50",
                             "origin",
                             f"refs/merge-requests/{self.merge_request_iid}/head:mr-head",
                         ],
@@ -304,7 +306,7 @@ class Gitlab(BaseBackend):
                                 "git",
                                 "fetch",
                                 "--depth",
-                                "1",
+                                "50",
                                 "origin",
                                 f"refs/heads/{target_branch}:target-branch",
                             ],
@@ -332,6 +334,24 @@ class Gitlab(BaseBackend):
                     self.logger.error(f"Git operation failed: {e.stderr}")
                     raise RuntimeError(f"Git operation failed: {e.stderr}") from e
 
+                self._run_git_optional(
+                    ["git", "submodule", "update", "--init", "--recursive"],
+                    cwd=repo_dir,
+                    env=env,
+                    timeout=300,
+                    warning="Failed to initialize git submodules; "
+                    "submodule content may be missing from the review",
+                )
+                if shutil.which("git-lfs"):
+                    self._run_git_optional(
+                        ["git", "lfs", "pull"],
+                        cwd=repo_dir,
+                        env=env,
+                        timeout=300,
+                        warning="Failed to pull git-lfs objects; "
+                        "LFS-backed files remain pointer stubs",
+                    )
+
             self.repo_dir = repo_dir
         except Exception:
             try:
@@ -339,6 +359,36 @@ class Gitlab(BaseBackend):
             except Exception as e:
                 self.logger.error(f"Failed to clean up temp repo directory: {e}")
             raise
+
+    def _run_git_optional(
+        self,
+        args: List[str],
+        cwd: str,
+        env: Dict[str, str],
+        timeout: int,
+        warning: str,
+    ) -> None:
+        """Run a best-effort git command, logging a warning instead of failing.
+
+        Args:
+            args: git command line (including the leading ``git``).
+            cwd: Repository directory to run the command in.
+            env: Environment (with credentials) for the subprocess.
+            timeout: Timeout in seconds.
+            warning: Warning message logged on failure.
+        """
+        try:
+            subprocess.run(
+                args,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=cwd,
+                env=env,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            self.logger.warning(f"{warning}: {e}")
 
     def cleanup(self) -> None:
         if self.repo_dir:

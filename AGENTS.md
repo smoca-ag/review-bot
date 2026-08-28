@@ -58,7 +58,7 @@ review_bot/
 ├── orchestration/         Pipeline execution: agents, prompts, formatting, top-level review()
 ├── agents/                AgentDef definitions: context, security, logic, architecture, test, performance, critic
 ├── backend/               Data access: Git, Gitlab, ContainerManager, GitlabReviewPoster
-├── tools/                 9 pydantic_ai.Tool definitions: view_code_diff_section, read_file, list_files, search_code, execute_command, dependency_graph, semantic_code_search, suggest_bot_improvement, update_todo
+├── tools/                 9 pydantic_ai.Tool definitions: view_code_diff_section, read_file, list_files, glob, execute_command, dependency_graph, semantic_code_search, suggest_bot_improvement, update_todo
 ├── graph/                 Dependency graph engine via tree-sitter (TS/TSX, Ruby, Swift, Kotlin, Python)
 ├── rag/                   Ephemeral ChromaDB vector index (create_vector_index, build_vector_index)
 ├── utils/                 Diff utilities (DiffHunk, truncation, coordinate resolution) and text helpers
@@ -70,10 +70,11 @@ review_bot/
 All agent tools delegate to `ContainerManager` (`backend/container_manager.py`), which runs commands in the Podman sandbox:
 - `read_file` → `podman exec cat <file>`
 - `list_files` → `podman exec ls -la`
-- `search_code` → `podman exec grep -rn`
-- `execute_command` → `podman exec /bin/sh -c "<command>"` (60s timeout)
+- `execute_command` → `podman exec /bin/bash -c "<command>"` (60s timeout); code search uses `rg` (ripgrep) inside the container
 
 `semantic_code_search` queries ChromaDB locally; `suggest_bot_improvement` appends JSON to `~/.review-bot/improvements.log`.
+
+`/workspace` is a plain bind mount, so anything agents install inside the sandbox (node_modules, gems, …) survives a container restart. If the container dies mid-review, the next tool call restarts it once; if the restart fails, tools return an explicit "sandbox unavailable" error so agents mark findings as not tool-verified.
 
 Tools receive `RunContext[ReviewDeps]` giving access to `mr_request`, `mr_description`, `container_manager`, and `vector_index`.
 
@@ -120,7 +121,7 @@ Tests in `tests/` cover `utils`, `graph`, and end-to-end tool execution. CI runs
 
 - **Sequential sub-agent execution** (not parallel) — all agents share the same system prompt, maximizing LLM prefix cache hits. Only the specialty suffix differs per agent.
 - **Critic as gatekeeper** — sub-agents are permissive; the critic filters false positives (confidence < 0.7), enforces thresholds, and strips all positive feedback.
-- **Podman sandbox** — agents execute commands in an isolated container. `ContainerManager` is the single delegation point for all sandbox access.
+- **Podman sandbox** — agents execute commands in an isolated container. `ContainerManager` is the single delegation point for all sandbox access. `/workspace` is a plain bind mount and the container is restarted once automatically if it dies mid-review, so dependency installs survive restarts and long reviews don't silently lose verification ability.
 - **Ephemeral RAG** — ChromaDB index is built in-memory per review; no persistent storage.
 - **Async-first** — the entire pipeline (`orchestration/pipeline.py`), CLI (`cli.py`), and tool functions are `async def`.
 - **Diff coordinate resolution** (`utils/diff.py:resolve_diff_coordinates`) — maps new-file line numbers back to old-file coordinates for accurate GitLab inline comments, handling renames.
@@ -128,3 +129,5 @@ Tests in `tests/` cover `utils`, `graph`, and end-to-end tool execution. CI runs
 - **Top-level entrypoints only** — `review_bot/` contains only `__init__.py`, `cli.py`, `gitlab_webhook.py`, and `config.py`. Every implementation detail lives in a sub-package. This follows Clean Code: the top-level is a table of contents; the sub-packages are the chapters.
 - **Minimal change preference** — when implementing features, prefer the smallest possible change. When you can achieve the same outcome by removing or simplifying existing code instead of adding new code, do that.
 - **Tool naming by model consensus** — tool function names, descriptions, and parameter signatures are driven by what the local LLM naturally generates. For each tool, `scripts/ask_tool_description.py` sends multiple natural-language descriptions to the model and asks it to produce the ideal JSON function definition. The most frequent model-preferred name is adopted for the Python function. This keeps tool schemas aligned with model expectations, improving tool-call accuracy. The companion shell scripts in `test_native_llm_tools/` run the same methodology in bulk.
+- **Code search via `rg`, not a dedicated tool** — the former `search_code` tool (BRE grep, no regex alternation) was removed; agents search code with `rg` through `execute_command`, which supports full regex and is faster. `glob` supports brace alternation (`**/*.{test,spec}.ts`) via `expand_braces` in `container_manager.py`.
+- **Complete checkout** (`backend/gitlab.py:fetch_repository`) — MRs are fetched with `--depth 50` (parent commits available for diffing), git submodules are initialized recursively, and git-lfs objects are pulled (when git-lfs is on the host) so submodule bumps and LFS fixtures are reviewable.

@@ -67,9 +67,20 @@ def paginate_text(
     text: str,
     start_line: int,
     max_lines: int | None,
-    max_line_length: int = _MAX_LINE_LENGTH,
+    max_line_length: int | None = _MAX_LINE_LENGTH,
     add_line_numbers: bool = False,
 ) -> str:
+    """Slice text into a readable page, optionally numbering and truncating lines.
+
+    Args:
+        text: Full text to paginate.
+        start_line: 1-indexed line to start reading from.
+        max_lines: Maximum number of lines to return; ``None`` uses the
+            ``MAX_LINES`` default.
+        max_line_length: Per-line truncation limit; ``None`` disables
+            truncation entirely.
+        add_line_numbers: Prefix each returned line with its line number.
+    """
     max_lines = _MAX_FILE_LINES if max_lines is None else max_lines
     lines = text.splitlines()
     total = len(lines)
@@ -78,7 +89,7 @@ def paginate_text(
     chunk = lines[start_idx:end_idx]
     processed_chunk = []
     for i, line in enumerate(chunk):
-        if len(line) > max_line_length:
+        if max_line_length is not None and len(line) > max_line_length:
             line = line[: max_line_length - 3] + "..."
         if add_line_numbers:
             processed_chunk.append(f"{i + start_line:4d} | {line}")

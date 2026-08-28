@@ -1,26 +1,97 @@
+"""Manages a sandboxed Podman container for code review tool execution.
+
+Independent of MR data, diff loading, and review posting. The container is
+mounted as a plain bind mount so that anything agents install inside the
+sandbox (node_modules, gems, ...) survives a transparent container restart.
+"""
+
 import logging
 import os
+import re
 import subprocess
+import time
 import uuid
-from typing import Optional
+from typing import Callable
+
+SANDBOX_UNAVAILABLE_MESSAGE = (
+    "Error: sandbox container unavailable and could not be restarted. "
+    "Tool-based verification impossible — mark affected findings inconclusive "
+    "and state that verification was not tool-based."
+)
+
+_BRACE_GROUP_RE = re.compile(r"\{([^{}]*,[^{}]*)\}")
+_MAX_EXPANDED_PATTERNS = 32
+_MAX_EXPANSION_PASSES = 8
+
+
+def expand_braces(pattern: str) -> list[str]:
+    """Expand a glob pattern with brace alternation into plain patterns.
+
+    Supports one or more ``{a,b}`` groups (including nested groups, expanded
+    innermost first). Groups without a comma are left literal. Pathological
+    patterns expanding beyond the cap are returned unchanged.
+
+    Args:
+        pattern: Glob pattern, possibly containing brace groups.
+
+    Returns:
+        List of expanded patterns; a single-element list with the original
+        pattern when it contains no expandable braces or exceeds the cap.
+    """
+    patterns = [pattern]
+    for _ in range(_MAX_EXPANSION_PASSES):
+        expanded: list[str] = []
+        changed = False
+        for current in patterns:
+            match = _BRACE_GROUP_RE.search(current)
+            if not match:
+                expanded.append(current)
+                continue
+            changed = True
+            for alternative in match.group(1).split(","):
+                expanded.append(
+                    current[: match.start()] + alternative + current[match.end():]
+                )
+        if not changed:
+            break
+        if len(expanded) > _MAX_EXPANDED_PATTERNS:
+            return [pattern]
+        patterns = expanded
+    return patterns
 
 
 class ContainerManager:
     """Manages a sandboxed Podman container for code review tool execution.
 
-    Independent of MR data, diff loading, and review posting.
+    If the container dies mid-review (e.g. reclaimed by the host), the next
+    tool call restarts it once from the same image and mount; writes made by
+    earlier commands survive because ``/workspace`` is a plain bind mount.
     """
 
     def __init__(self, logger: logging.Logger) -> None:
         self.logger = logger
-        self.container_name: Optional[str] = None
+        self.container_name: str | None = None
+        self.repo_dir: str | None = None
+        self.image: str | None = None
 
     def setup(self, repo_dir: str, image: str = "review-bot-env:latest") -> None:
-        """Create a sandboxed Podman container with the repository mounted."""
+        """Create a sandboxed Podman container with the repository mounted.
+
+        Args:
+            repo_dir: Host directory containing the repository checkout.
+            image: Container image to run.
+
+        Raises:
+            RuntimeError: When the image build, container start, or startup
+                health check fails.
+        """
         if not repo_dir:
             if self.logger:
                 self.logger.error("No repository directory to mount.")
             return
+
+        self.repo_dir = repo_dir
+        self.image = image
 
         project_root = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..")
@@ -30,8 +101,22 @@ class ContainerManager:
         if build_result.returncode != 0:
             raise RuntimeError("Failed to build the review-container image.")
 
+        self._start_container()
+        self._wait_until_ready()
+
+        if self.logger:
+            self.logger.info(f"Started Podman container: {self.container_name}")
+
+    def _start_container(self) -> None:
+        """Start the sandbox container under a fresh name.
+
+        Raises:
+            RuntimeError: When podman fails to start the container or times out.
+        """
+        assert self.repo_dir is not None and self.image is not None
+
         self.container_name = f"review-bot-{uuid.uuid4().hex[:8]}"
-        abs_repo_dir = os.path.abspath(repo_dir)
+        abs_repo_dir = os.path.abspath(self.repo_dir)
         try:
             result = subprocess.run(
                 [
@@ -51,16 +136,17 @@ class ContainerManager:
                     "--cap-add=CAP_SETGID",
                     "--cap-add=CAP_KILL",
                     "--cap-add=CAP_SYS_CHROOT",
-                    "--memory=4g",
-                    "--memory-swap=4g",
-                    "--cpus=2",
+                    "--memory=8g",
+                    "--memory-swap=8g",
+                    "--cpus=4",
+                    "--pids-limit=8192",
                     "--name",
                     self.container_name,
                     "-v",
-                    f"{abs_repo_dir}:/workspace:O",
+                    f"{abs_repo_dir}:/workspace",
                     "-w",
                     "/workspace",
-                    image,
+                    self.image,
                 ],
                 capture_output=True,
                 text=True,
@@ -74,8 +160,125 @@ class ContainerManager:
                 f"Failed to start Podman container (timeout): {e}"
             ) from e
 
+    def _wait_until_ready(self, timeout: float = 15.0) -> None:
+        """Block until the container accepts exec sessions.
+
+        Args:
+            timeout: Maximum seconds to wait for the container to become ready.
+
+        Raises:
+            RuntimeError: When the container is not ready within the timeout.
+        """
+        assert self.container_name is not None
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                probe = subprocess.run(
+                    ["podman", "exec", self.container_name, "true"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if probe.returncode == 0:
+                    return
+            except subprocess.TimeoutExpired:
+                pass
+            time.sleep(0.5)
+
+        raise RuntimeError(
+            f"Sandbox container {self.container_name} did not become ready "
+            f"within {timeout} seconds."
+        )
+
+    def _is_container_missing(self, output: str, returncode: int) -> bool:
+        """Return True when a podman failure indicates the sandbox is gone."""
+        return returncode == 125 or "no container with name or ID" in output
+
+    def _ensure_available(self) -> bool:
+        """Ensure a sandbox container is running, restarting it once if needed.
+
+        Returns:
+            True when a container is (again) available; False when no container
+            is running and the restart attempt failed.
+        """
+        if not self.container_name or not self.repo_dir or not self.image:
+            return False
+
+        try:
+            ps = subprocess.run(
+                [
+                    "podman",
+                    "ps",
+                    "--filter",
+                    f"name=^{self.container_name}$",
+                    "--format",
+                    "{{.Names}}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if ps.returncode == 0 and self.container_name in ps.stdout.split():
+                return True
+        except subprocess.TimeoutExpired:
+            pass
+
+        old_name = self.container_name
         if self.logger:
-            self.logger.info(f"Started Podman container: {self.container_name}")
+            self.logger.warning(
+                f"Sandbox container {old_name} is gone; attempting restart..."
+            )
+        try:
+            self._start_container()
+            self._wait_until_ready()
+            if self.logger:
+                self.logger.info(
+                    f"Restarted sandbox container as {self.container_name} "
+                    f"(was {old_name})."
+                )
+            return True
+        except (RuntimeError, subprocess.TimeoutExpired) as e:
+            if self.logger:
+                self.logger.error(f"Failed to restart sandbox container: {e}")
+            return False
+
+    def _run_with_restart(
+        self, run: Callable[[], subprocess.CompletedProcess]
+    ) -> subprocess.CompletedProcess | str:
+        """Run a podman exec command, restarting the sandbox once if it died.
+
+        Args:
+            run: Zero-arg callable that builds and runs the podman command
+                against the current ``self.container_name``; called again on
+                retry so a restarted container's new name is picked up.
+
+        Returns:
+            The CompletedProcess of the (possibly retried) run, or
+            ``SANDBOX_UNAVAILABLE_MESSAGE`` when the sandbox died and could
+            not be restarted.
+
+        Raises:
+            subprocess.CalledProcessError: When the command itself fails.
+            subprocess.TimeoutExpired: When the command times out.
+        """
+        try:
+            output = run()
+        except subprocess.CalledProcessError as e:
+            if not self._is_container_missing(e.stdout or "", e.returncode):
+                raise
+            if not self._ensure_available():
+                return SANDBOX_UNAVAILABLE_MESSAGE
+            return run()
+
+        if (
+            output.returncode != 0
+            and self._is_container_missing(output.stdout or "", output.returncode)
+        ):
+            if not self._ensure_available():
+                return SANDBOX_UNAVAILABLE_MESSAGE
+            return run()
+        return output
 
     def cleanup(self) -> None:
         """Kill and clean up the Podman container."""
@@ -122,7 +325,8 @@ class ContainerManager:
         if not self.container_name:
             return "Error: No active container found."
 
-        try:
+        def _run() -> subprocess.CompletedProcess:
+            assert self.container_name is not None
             cmd: list[str] = ["podman", "exec"]
             if working_directory:
                 cmd.extend(["--workdir", working_directory])
@@ -130,7 +334,7 @@ class ContainerManager:
                 for key, value in environment.items():
                     cmd.extend(["--env", f"{key}={value}"])
             cmd.extend([self.container_name, "/bin/bash", "-c", command])
-            output = subprocess.run(
+            return subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -138,25 +342,34 @@ class ContainerManager:
                 timeout=timeout,
                 check=True,
             )
-            return output.stdout
+
+        try:
+            output = self._run_with_restart(_run)
         except subprocess.TimeoutExpired:
             return f"Error: Command timed out after {timeout} seconds."
         except subprocess.CalledProcessError as e:
             err_output: str = e.stdout if e.stdout else "(no output)"
             return f"Command failed with exit code {e.returncode}:\n{err_output}"
-        except ValueError:
-            return "Error: Failed to parse command."
+        if isinstance(output, str):
+            return output
+        return output.stdout
 
-    def get_file_raw(self, file_path: str) -> Optional[str]:
+    def get_file_raw(self, file_path: str) -> str | None:
         """Return raw file content from the container without line-number formatting.
 
-        Returns ``None`` when the file does not exist.
+        Args:
+            file_path: Path of the file inside the container.
+
+        Returns:
+            The file content, ``None`` when the file does not exist, or an
+            error message string when the sandbox or read fails.
         """
         if not self.container_name:
             return "Error: No active container found."
 
-        try:
-            output = subprocess.run(
+        def _run() -> subprocess.CompletedProcess:
+            assert self.container_name is not None
+            return subprocess.run(
                 [
                     "podman",
                     "exec",
@@ -169,21 +382,28 @@ class ContainerManager:
                 text=True,
                 timeout=30,
             )
-            return output.stdout
+
+        try:
+            output = self._run_with_restart(_run)
         except subprocess.TimeoutExpired:
             return "Error: Command timed out after 30 seconds."
-        except subprocess.CalledProcessError as e:
-            error_msg = e.stdout or ""
+        if isinstance(output, str):
+            return output
+
+        if output.returncode != 0:
+            error_msg = output.stdout or ""
             if "No such file" in error_msg or "cannot access" in error_msg:
                 return None
             return f"Error reading file {file_path}: {error_msg.strip()}"
+        return output.stdout
 
     def list_files(self, path: str = ".", recursive: bool = False) -> str:
         """List files in the repository at the given path inside the container."""
         if not self.container_name:
             return "Error: No active container found."
 
-        try:
+        def _run() -> subprocess.CompletedProcess:
+            assert self.container_name is not None
             cmd = (
                 [
                     "podman",
@@ -200,7 +420,7 @@ class ContainerManager:
                 if recursive
                 else ["podman", "exec", self.container_name, "ls", "-1a", path]
             )
-            output = subprocess.run(
+            return subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -208,29 +428,48 @@ class ContainerManager:
                 timeout=30,
                 check=True,
             )
-            return output.stdout
+
+        try:
+            output = self._run_with_restart(_run)
         except subprocess.TimeoutExpired:
             return "Error: Command timed out after 30 seconds."
         except subprocess.CalledProcessError as e:
             err_output = e.stdout.strip() if e.stdout else "(no output)"
             return f"Error listing files: {err_output}"
+        if isinstance(output, str):
+            return output
+        return output.stdout
 
     def glob_files(self, pattern: str) -> str:
-        """Find files matching a glob pattern inside the container.
+        """Find files matching glob pattern(s) inside the container.
 
-        Uses Python's ``glob.glob(recursive=True)`` which correctly supports
-        ``**`` for recursive directory matching.
+        Supports brace alternation such as ``**/*.{test,spec}.ts`` by expanding
+        it into multiple patterns, then unioning the matches.
+
+        Args:
+            pattern: Glob pattern, possibly with brace groups.
+
+        Returns:
+            Newline-separated matching paths, ``No files matched.`` when empty,
+            or an error message string.
         """
         if not self.container_name:
             return "Error: No active container found."
 
-        try:
+        patterns = expand_braces(pattern)
+
+        def _run() -> subprocess.CompletedProcess:
+            assert self.container_name is not None
             script = (
                 "import glob, sys\n"
-                "for f in sorted(glob.glob(sys.argv[1], recursive=True)):\n"
-                "    print(f)"
+                "seen = set()\n"
+                "for pat in sys.argv[1:]:\n"
+                "    for f in sorted(glob.glob(pat, recursive=True)):\n"
+                "        if f not in seen:\n"
+                "            seen.add(f)\n"
+                "            print(f)"
             )
-            output = subprocess.run(
+            return subprocess.run(
                 [
                     "podman",
                     "exec",
@@ -240,7 +479,7 @@ class ContainerManager:
                     "python3",
                     "-c",
                     script,
-                    pattern,
+                    *patterns,
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -248,41 +487,14 @@ class ContainerManager:
                 timeout=30,
                 check=True,
             )
-            return output.stdout or "No files matched."
+
+        try:
+            output = self._run_with_restart(_run)
         except subprocess.TimeoutExpired:
             return "Error: Command timed out after 30 seconds."
         except subprocess.CalledProcessError as e:
             err_output = e.stdout.strip() if e.stdout else "(no output)"
             return f"Error globbing files: {err_output}"
-
-    def scan_code(self, pattern: str, path: str = ".") -> str:
-        """Scan the repository for a pattern using grep inside the container."""
-        if not self.container_name:
-            return "Error: No active container found."
-
-        try:
-            output = subprocess.run(
-                [
-                    "podman",
-                    "exec",
-                    "-w",
-                    "/workspace",
-                    self.container_name,
-                    "grep",
-                    "-rn",
-                    pattern,
-                    path,
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                timeout=30,
-            )
-            return output.stdout
-        except subprocess.TimeoutExpired:
-            return "Error: Command timed out after 30 seconds."
-        except subprocess.CalledProcessError as e:
-            if e.returncode == 1:
-                return "No matches found."
-            err_output = e.stdout.strip() if e.stdout else "(no output)"
-            return f"Error scanning code: {err_output}"
+        if isinstance(output, str):
+            return output
+        return output.stdout or "No files matched."

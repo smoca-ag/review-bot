@@ -16,7 +16,6 @@ from review_bot.tools import (
     glob,
     read_file,
     list_files,
-    search_code,
     semantic_code_search,
 )
 
@@ -76,22 +75,40 @@ class TestToolsE2E(unittest.IsolatedAsyncioTestCase):
         self.assertIn("pyproject.toml", result)
 
     def test_e2e_list_files_recursive(self):
-        result = list_files(self.ctx, ".", recursive=True)
+        result = list_files(self.ctx, "review_bot", recursive=True)
         self.assertNotIn("Error", result)
         self.assertIn("review_bot", result)
-        self.assertIn("pyproject.toml", result)
-        self.assertIn("code.py", result)
+        self.assertIn("cli.py", result)
+        self.assertIn("tools", result)
 
     def test_e2e_read_file(self):
         result = read_file(self.ctx, "pyproject.toml")
         self.assertNotIn("Error", result)
         self.assertIn('name = "review_bot"', result)
 
-    def test_e2e_search_code(self):
-        result = search_code(self.ctx, "review_bot")
+    def test_e2e_glob_braces(self):
+        result = glob(self.ctx, "*.{md,toml}")
         self.assertNotIn("Error", result)
         self.assertIn("pyproject.toml", result)
+        self.assertIn("Readme.md", result)
+
+    def test_e2e_read_file_long_lines(self):
+        result = read_file(self.ctx, "pyproject.toml", max_line_length=5000)
+        self.assertNotIn("Error", result)
+        self.assertNotIn("...", result)
+
+    async def test_e2e_execute_command(self):
+        result = await execute_command(self.ctx, "ls -la")
+        self.assertNotIn("Error", result)
         self.assertIn("review_bot", result)
+        self.assertIn("pyproject.toml", result)
+
+    async def test_e2e_execute_command_ripgrep(self):
+        result = await execute_command(
+            self.ctx, "rg -l --no-messages 'review_bot' pyproject.toml"
+        )
+        self.assertNotIn("Error", result)
+        self.assertIn("pyproject.toml", result)
 
     def test_e2e_glob_py_files(self):
         result = glob(self.ctx, "**/*.py")
@@ -107,12 +124,6 @@ class TestToolsE2E(unittest.IsolatedAsyncioTestCase):
     def test_e2e_glob_no_match(self):
         result = glob(self.ctx, "*.nonexistent")
         self.assertIn("No files matched", result)
-
-    async def test_e2e_execute_command(self):
-        result = await execute_command(self.ctx, "ls -la")
-        self.assertNotIn("Error", result)
-        self.assertIn("review_bot", result)
-        self.assertIn("pyproject.toml", result)
 
     def test_e2e_semantic_code_search(self):
         if self.indexed_count == 0:
