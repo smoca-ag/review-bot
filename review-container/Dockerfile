@@ -72,4 +72,16 @@ RUN systemctl enable postgresql
 # Systemd needs this to run in a container correctly
 STOPSIGNAL SIGRTMIN+3
 
+# Reset journald's capability bounding set so it can start in the container
+# (the tilde form grants journald everything the container itself holds).
+RUN mkdir -p /etc/systemd/system/systemd-journald.service.d \
+    && printf '[Service]\nCapabilityBoundingSet=~\nAmbientCapabilities=\n' \
+    > /etc/systemd/system/systemd-journald.service.d/override.conf
+
+# Forward journal output to the container console so it is visible via
+# `podman logs <container>` from the host.
+RUN mkdir -p /etc/systemd/journald.conf.d \
+    && printf '[Journal]\nForwardToConsole=yes\nMaxLevelConsole=info\nTTYPath=/dev/console\n' \
+    > /etc/systemd/journald.conf.d/forward-console.conf
+
 CMD ["/lib/systemd/systemd"]
