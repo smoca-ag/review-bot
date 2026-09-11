@@ -28,7 +28,7 @@ if not logger.handlers:
 
 
 async def review(spec: str, backend: str, post: bool = False) -> None:
-    ensure_setup()
+    ensure_setup(logger)
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span("review_process") as span:
         span.set_attribute("review.spec", spec)

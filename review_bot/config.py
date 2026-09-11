@@ -1,3 +1,4 @@
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -34,9 +35,14 @@ def _get_model() -> str:
     return f"openai:{model_name}"
 
 
-def ensure_setup() -> None:
+def ensure_setup(logger: logging.Logger | None = None) -> None:
+    """Load environment and initialise telemetry.
+
+    Args:
+        logger: Logger forwarded to telemetry setup for tool-call logging.
+    """
     load_dotenv()
-    setup_telemetry()
+    setup_telemetry(logger)
 
 
 def resolve_model() -> str:

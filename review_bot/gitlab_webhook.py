@@ -395,7 +395,7 @@ def main():
     # Initialize telemetry after multiprocessing is configured to avoid issues on macOS
     from review_bot.infra.telemetry import setup_telemetry
 
-    setup_telemetry()
+    setup_telemetry(logger)
 
     # --- CRITICAL: Token Check ---
     if not GITLAB_WEBHOOK_TOKEN:

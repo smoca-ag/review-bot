@@ -2,3 +2,6 @@
 *~
 .idea
 __pycache__/
+.DS_Store
+improvements.log
+review_bot.egg-info/
