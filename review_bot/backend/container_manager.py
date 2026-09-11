@@ -129,6 +129,7 @@ class ContainerManager:
                     "podman",
                     "run",
                     "-d",
+                    "-t",
                     "--rm",
                     "--systemd=always",
                     "--security-opt=no-new-privileges:true",
