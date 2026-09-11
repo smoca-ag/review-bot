@@ -16,14 +16,12 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     ripgrep \
     postgresql postgresql-16-postgis-3 \
-    && gem install rails bundler \
-    && rm -rf /var/lib/apt/lists/*
+    && gem install rails bundler 
 
 # Install current stable Node.js LTS from NodeSource
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && apt-get install -y nodejs \
-    && corepack enable \
-    && rm -rf /var/lib/apt/lists/*
+    && corepack enable 
 
 # Configure git
 RUN git config --global --add safe.directory /workspace
