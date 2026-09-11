@@ -3,6 +3,10 @@
 Independent of MR data, diff loading, and review posting. The container is
 mounted as a plain bind mount so that anything agents install inside the
 sandbox (node_modules, gems, ...) survives a transparent container restart.
+
+Container names embed the creating process's PID (``review-bot-p<PID>-<hex>``)
+so :func:`prune_stale_containers` can reclaim containers whose owner died
+without running ``cleanup()`` (SIGKILL, OOM, crash, host quirk).
 """
 
 import logging
@@ -19,6 +23,8 @@ SANDBOX_UNAVAILABLE_MESSAGE = (
     "and state that verification was not tool-based."
 )
 
+_OWNER_PID_RE = re.compile(r"^review-bot-p(\d+)-[0-9a-f]{8}$")
+_OWNER_NAME_FILTER = "^review-bot-p"
 _BRACE_GROUP_RE = re.compile(r"\{([^{}]*,[^{}]*)\}")
 _MAX_EXPANDED_PATTERNS = 32
 _MAX_EXPANSION_PASSES = 8
@@ -115,7 +121,7 @@ class ContainerManager:
         """
         assert self.repo_dir is not None and self.image is not None
 
-        self.container_name = f"review-bot-{uuid.uuid4().hex[:8]}"
+        self.container_name = f"review-bot-p{os.getpid()}-{uuid.uuid4().hex[:8]}"
         abs_repo_dir = os.path.abspath(self.repo_dir)
         try:
             result = subprocess.run(
@@ -498,3 +504,89 @@ class ContainerManager:
         if isinstance(output, str):
             return output
         return output.stdout or "No files matched."
+
+
+def _owner_pid(container_name: str) -> int | None:
+    """Return the PID embedded in a container name, or None if unparseable."""
+    match = _OWNER_PID_RE.match(container_name)
+    return int(match.group(1)) if match else None
+
+
+def _process_alive(pid: int) -> bool:
+    """Return True when a process with the given PID currently exists."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def prune_stale_containers(
+    logger: logging.Logger | None = None, timeout: int = 15
+) -> int:
+    """Remove sandbox containers whose owning review process is dead.
+
+    Containers are named ``review-bot-p<PID>-<hex>``; a container is stale
+    when no process with ``<PID>`` exists anymore. PID reuse can make a dead
+    owner look alive, which only delays reclamation until that PID is free
+    again — a live-PID container is never removed, so long-running reviews
+    are always safe.
+
+    Args:
+        logger: Optional logger for removal and failure reporting.
+        timeout: Per-podman-call timeout in seconds.
+
+    Returns:
+        The number of containers removed.
+    """
+    try:
+        ps = subprocess.run(
+            [
+                "podman",
+                "ps",
+                "--all",
+                "--filter",
+                f"name={_OWNER_NAME_FILTER}",
+                "--format",
+                "{{.Names}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        if logger:
+            logger.warning(f"Stale container sweep could not list containers: {e}")
+        return 0
+
+    if ps.returncode != 0:
+        if logger:
+            logger.warning(f"Stale container sweep failed to list containers: {ps.stderr}")
+        return 0
+
+    removed = 0
+    for name in ps.stdout.split():
+        pid = _owner_pid(name)
+        if pid is None or _process_alive(pid):
+            continue
+        try:
+            rm = subprocess.run(
+                ["podman", "rm", "-f", name],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            if logger:
+                logger.warning(f"Failed to remove stale container {name}: {e}")
+            continue
+        if rm.returncode != 0:
+            if logger:
+                logger.warning(f"Failed to remove stale container {name}: {rm.stderr}")
+            continue
+        removed += 1
+        if logger:
+            logger.info(f"Removed stale sandbox container: {name}")
+    return removed

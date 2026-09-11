@@ -9,15 +9,20 @@ import signal as signal_module
 import sys
 import threading
 import time
+from typing import NoReturn
 
 from opentelemetry import trace
 
 from review_bot import review
+from review_bot.backend.container_manager import prune_stale_containers
 
 # --- Logger Setup ---
 # Get a logger for this module.
 # Configuration is applied in main()
 logger = logging.getLogger(__name__)
+
+# Seconds between stale-sandbox sweeps in the reaper thread.
+SWEEP_INTERVAL_SECONDS = 600
 
 # --- Configuration (from Environment Variables) ---
 # Read lazily in main() to allow env changes between runs / in tests.
@@ -51,15 +56,28 @@ def _load_config():
 # --- The function to run in a separate process ---
 
 
+def _raise_on_sigterm(signum: int, frame: object) -> NoReturn:
+    """Abort the review cooperatively so sandbox cleanup still runs.
+
+    Further SIGTERMs are ignored so the cleanup in the orchestrator's finally
+    block finishes; the manager escalates to SIGKILL if that is not enough.
+    """
+    signal_module.signal(signal_module.SIGTERM, signal_module.SIG_IGN)
+    raise SystemExit(128 + signum)
+
+
 def start_ai_review(mr_url):
     """
     This function runs in its own process.
     It receives the MR URL for both identification and the review spec.
     """
     try:
+        signal_module.signal(signal_module.SIGTERM, _raise_on_sigterm)
         logger.info(f"Processing {mr_url}")
         asyncio.run(review(mr_url, backend="gitlab", post=True))
         logger.info(f"Finished {mr_url}")
+    except SystemExit as e:
+        logger.info(f"Review for {mr_url} aborted by signal (exit {e.code})")
     except Exception as e:
         logger.error(f"ERROR during AI review for {mr_url}: {e}", exc_info=True)
 
@@ -108,11 +126,11 @@ class ReviewManager:
             return
         try:
             os.kill(p.pid, signal_module.SIGTERM)
-            p.join(timeout=15)
+            p.join(timeout=30)
         except (ProcessLookupError, OSError):
             return
         if p.is_alive():
-            p.terminate()
+            p.kill()
 
     def _worker(self) -> None:
         while True:
@@ -135,6 +153,7 @@ class ReviewManager:
                 self.active[mr_url] = p
 
     def _reaper(self) -> None:
+        last_sweep = time.monotonic()
         while True:
             with self.condition:
                 finished = [url for url, p in self.active.items() if not p.is_alive()]
@@ -143,6 +162,11 @@ class ReviewManager:
                     logger.info(f"Review completed for {url}")
                 if finished:
                     self.condition.notify_all()
+            if time.monotonic() - last_sweep >= SWEEP_INTERVAL_SECONDS:
+                last_sweep = time.monotonic()
+                removed = prune_stale_containers(logger)
+                if removed:
+                    logger.info(f"Pruned {removed} stale sandbox container(s)")
             time.sleep(0.5)
 
     def _has_capacity(self) -> bool:
@@ -380,6 +404,9 @@ def main():
         return 1  # Return 1 for failure
 
     global review_manager
+    stale = prune_stale_containers(logger)
+    if stale:
+        logger.info(f"Pruned {stale} stale sandbox container(s) from previous runs")
     review_manager = ReviewManager(max_parallel=MAX_PARALLEL_REVIEWS)
 
     httpd = None  # Initialize to None for the finally block
