@@ -26,9 +26,27 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
 # Configure git
 RUN git config --global --add safe.directory /workspace
 
-# RTK (Qwen3.8-Flash-Next likes it)
-
-RUN RTK_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+# RTK (Qwen3.8-Flash-Next likes it). Pinned to a release with digests baked
+# into this file; the old curl-from-master | sh pipe let any push to the
+# upstream repo run arbitrary code as root at build time. Bump RTK_VERSION
+# and update both digests from https://github.com/rtk-ai/rtk/releases
+ARG RTK_VERSION=v0.49.0
+RUN set -eu; \
+    case "$(uname -m)" in \
+        x86_64) \
+            RTK_ASSET=rtk-x86_64-unknown-linux-musl.tar.gz; \
+            RTK_SHA256=7278231dfd7e6a730a4ab7f847b195bcf02289c2d57622b0dab75a6411100c8f ;; \
+        aarch64) \
+            RTK_ASSET=rtk-aarch64-unknown-linux-gnu.tar.gz; \
+            RTK_SHA256=c8ea4b6560841e73157c134fd4a3293914c6ede42e786ee985cf491fde691ba7 ;; \
+        *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    wget -q "https://github.com/rtk-ai/rtk/releases/download/${RTK_VERSION}/${RTK_ASSET}" -O /tmp/rtk.tar.gz; \
+    echo "${RTK_SHA256}  /tmp/rtk.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/rtk.tar.gz -C /usr/local/bin; \
+    chmod +x /usr/local/bin/rtk; \
+    rm /tmp/rtk.tar.gz; \
+    rtk --version
 
 # Additional Ruby versions via rbenv (projects pin Gemfile rubies newer than
 # system 3.2; repos with a .ruby-version select these automatically).
