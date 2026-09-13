@@ -13,10 +13,10 @@ security_agent_def = AgentDef(
         "dynamic eval/exec, secrets/credentials, file path handling, permission checks, "
         "HTTP headers, deserialization, and crypto operations.\n\n"
         "### YOUR FALSIFICATION PATTERNS:\n"
-        "- \"Is user input sanitized?\" → search_code for sanitization functions between input and usage\n"
+        "- \"Is user input sanitized?\" → execute_command with `rg` for sanitization functions between input and usage\n"
         "- \"Is auth enforced on this endpoint?\" → read_file for middleware/guard checks\n"
         "- \"Is this SQL parameterized?\" → read_file for parameterized query patterns\n"
-        "- \"Is this secret hardcoded?\" → search_code for env variable or secret manager usage\n"
+        "- \"Is this secret hardcoded?\" → execute_command with `rg` for env variable or secret manager usage\n"
         "- \"Can this path be traversed?\" → read_file for path validation/sandboxing\n"
     ),
 )

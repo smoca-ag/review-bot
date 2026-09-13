@@ -25,7 +25,9 @@ def create_vector_index(repo_dir: str | None) -> tuple:
             rag_span.set_attribute("rag.repo_dir", repo_dir)
         try:
             chroma_client = chromadb.EphemeralClient()
-            collection = chroma_client.create_collection("codebase")
+            collection = chroma_client.create_collection(
+                "codebase", metadata={"hnsw:space": "cosine"}
+            )
             if repo_dir:
                 indexed_count = build_vector_index(repo_dir, collection)
                 if indexed_count > 0:

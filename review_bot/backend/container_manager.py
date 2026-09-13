@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import subprocess
+import threading
 import time
 import uuid
 from typing import Callable
@@ -79,6 +80,9 @@ class ContainerManager:
         self.container_name: str | None = None
         self.repo_dir: str | None = None
         self.image: str | None = None
+        # Tool calls run in parallel threads; serializes container restarts
+        # so two threads never race on self.container_name.
+        self._restart_lock = threading.Lock()
 
     def setup(self, repo_dir: str, image: str = "review-bot-env:latest") -> None:
         """Create a sandboxed Podman container with the repository mounted.
@@ -209,46 +213,47 @@ class ContainerManager:
             True when a container is (again) available; False when no container
             is running and the restart attempt failed.
         """
-        if not self.container_name or not self.repo_dir or not self.image:
-            return False
+        with self._restart_lock:
+            if not self.container_name or not self.repo_dir or not self.image:
+                return False
 
-        try:
-            ps = subprocess.run(
-                [
-                    "podman",
-                    "ps",
-                    "--filter",
-                    f"name=^{self.container_name}$",
-                    "--format",
-                    "{{.Names}}",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            if ps.returncode == 0 and self.container_name in ps.stdout.split():
-                return True
-        except subprocess.TimeoutExpired:
-            pass
-
-        old_name = self.container_name
-        if self.logger:
-            self.logger.warning(
-                f"Sandbox container {old_name} is gone; attempting restart..."
-            )
-        try:
-            self._start_container()
-            self._wait_until_ready()
-            if self.logger:
-                self.logger.info(
-                    f"Restarted sandbox container as {self.container_name} "
-                    f"(was {old_name})."
+            try:
+                ps = subprocess.run(
+                    [
+                        "podman",
+                        "ps",
+                        "--filter",
+                        f"name=^{self.container_name}$",
+                        "--format",
+                        "{{.Names}}",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
                 )
-            return True
-        except (RuntimeError, subprocess.TimeoutExpired) as e:
+                if ps.returncode == 0 and self.container_name in ps.stdout.split():
+                    return True
+            except subprocess.TimeoutExpired:
+                pass
+
+            old_name = self.container_name
             if self.logger:
-                self.logger.error(f"Failed to restart sandbox container: {e}")
-            return False
+                self.logger.warning(
+                    f"Sandbox container {old_name} is gone; attempting restart..."
+                )
+            try:
+                self._start_container()
+                self._wait_until_ready()
+                if self.logger:
+                    self.logger.info(
+                        f"Restarted sandbox container as {self.container_name} "
+                        f"(was {old_name})."
+                    )
+                return True
+            except (RuntimeError, subprocess.TimeoutExpired) as e:
+                if self.logger:
+                    self.logger.error(f"Failed to restart sandbox container: {e}")
+                return False
 
     def _run_with_restart(
         self, run: Callable[[], subprocess.CompletedProcess]
@@ -289,37 +294,40 @@ class ContainerManager:
 
     def cleanup(self) -> None:
         """Kill and clean up the Podman container."""
-        if self.container_name:
+        if not self.container_name:
+            return
+        name = self.container_name
+        self.container_name = None
+        killed = False
+        try:
+            result = subprocess.run(
+                ["podman", "kill", name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+            killed = result.returncode == 0
+        except Exception:
+            pass
+        if killed:
+            if self.logger:
+                self.logger.info(f"Cleaned up container: {name}")
+        else:
+            # Containers run with --systemd=always and never exit on their
+            # own; a failed kill leaks a running container, so force-remove.
+            if self.logger:
+                self.logger.warning(
+                    f"Failed to kill container {name}, attempting remove"
+                )
             try:
                 subprocess.run(
-                    ["podman", "kill", self.container_name],
+                    ["podman", "rm", "-f", name],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=10,
                 )
-                if self.logger:
-                    self.logger.info(f"Cleaned up container: {self.container_name}")
-            except subprocess.CalledProcessError as e:
-                if self.logger:
-                    self.logger.error(
-                        f"Failed to kill container {self.container_name}: {e}"
-                    )
-            except subprocess.TimeoutExpired:
-                if self.logger:
-                    self.logger.warning(
-                        f"Timeout killing container {self.container_name}, attempting remove"
-                    )
-                    try:
-                        subprocess.run(
-                            ["podman", "rm", "-f", self.container_name],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            timeout=10,
-                        )
-                    except Exception:
-                        pass
-            finally:
-                self.container_name = None
+            except Exception:
+                pass
 
     def execute_command(
         self,

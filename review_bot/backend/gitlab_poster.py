@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 
@@ -43,10 +43,10 @@ class GitlabReviewPoster:
         self.merge_request_iid = merge_request_iid
         self.private_token = private_token
         self.logger = logger
-        self._current_head_sha: Optional[str] = None
+        self._current_head_sha: str | None = None
         self._head_sha_fetched = False
 
-    def get_current_head_sha(self) -> Optional[str]:
+    def get_current_head_sha(self) -> str | None:
         """Fetch (and cache per review run) the MR's current head sha.
 
         Returns:
@@ -78,7 +78,7 @@ class GitlabReviewPoster:
         return self._current_head_sha
 
     def _head_matches_review_snapshot(
-        self, versions: List[Dict[str, Any]]
+        self, versions: list[dict[str, Any]]
     ) -> bool:
         """Check that the MR head has not moved since the review started.
 
@@ -114,9 +114,9 @@ class GitlabReviewPoster:
         new_path: str,
         new_position: int,
         diff_response: str,
-        discussions: List[Dict[str, Any]],
-        versions: List[Dict[str, Any]],
-        current_user_id: Optional[int],
+        discussions: list[dict[str, Any]],
+        versions: list[dict[str, Any]],
+        current_user_id: int | None,
     ) -> None:
         if new_path == "/dev/null" or not new_path:
             return
@@ -202,8 +202,8 @@ class GitlabReviewPoster:
     def post_review(
         self,
         text: str,
-        discussions: List[Dict[str, Any]],
-        current_user_id: Optional[int],
+        discussions: list[dict[str, Any]],
+        current_user_id: int | None,
     ) -> None:
         headers = {
             "PRIVATE-TOKEN": self.private_token,
@@ -275,8 +275,8 @@ class GitlabReviewPoster:
 
     def cleanup_ghost_notes(
         self,
-        discussions: List[Dict[str, Any]],
-        current_user_id: Optional[int],
+        discussions: list[dict[str, Any]],
+        current_user_id: int | None,
     ) -> None:
         """Delete unresolved inline bot notes that GitLab can no longer render.
 

@@ -11,10 +11,17 @@ import threading
 import time
 from typing import NoReturn
 
+from dotenv import load_dotenv
 from opentelemetry import trace
 
-from review_bot import review
-from review_bot.backend.container_manager import prune_stale_containers
+# Load .env before importing review_bot: config constants
+# (AGENT_REQUEST_LIMIT, CONFIDENCE_THRESHOLD, MAX_LINES, ...) and this
+# module's _load_config() are read at import/startup time and would
+# otherwise miss .env values. Also runs in spawned review processes.
+load_dotenv()
+
+from review_bot import review  # noqa: E402
+from review_bot.backend.container_manager import prune_stale_containers  # noqa: E402
 
 # --- Logger Setup ---
 # Get a logger for this module.

@@ -1,16 +1,19 @@
 import argparse
-import asyncio  # 1. Added asyncio import
+import asyncio
 import sys
 
 from dotenv import load_dotenv
 
-from review_bot import BackendType, review
+# Load .env before importing review_bot: config constants
+# (AGENT_REQUEST_LIMIT, CONFIDENCE_THRESHOLD, MAX_LINES, ...) are captured
+# at import time and would otherwise miss .env values.
+load_dotenv()
+
+from review_bot import BackendType, review  # noqa: E402
 
 
 async def async_main():
     """Async entry point for the review-bot command."""
-    load_dotenv()
-
     parser = argparse.ArgumentParser(
         description="AI Code Review for GitLab Merge Requests"
     )

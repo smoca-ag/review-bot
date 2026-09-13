@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 
 class BaseBackend:
@@ -12,7 +11,7 @@ class BaseBackend:
 
     def __init__(self, logger: logging.Logger, url: str) -> None:
         self.url = url
-        self.repo_dir: Optional[str] = None
+        self.repo_dir: str | None = None
         self.logger: logging.Logger = logger
 
     def load(self) -> None:
@@ -30,10 +29,10 @@ class BaseBackend:
     def diff(self) -> str:
         raise NotImplementedError
 
-    def description(self) -> Optional[str]:
+    def description(self) -> str | None:
         return None
 
-    def title(self) -> Optional[str]:
+    def title(self) -> str | None:
         return None
 
     def cleanup(self) -> None:
@@ -42,4 +41,8 @@ class BaseBackend:
 
     def post_review(self, text: str) -> None:
         """Post a top-level review comment (GitLab only; no-op for other backends)."""
+        pass
+
+    def post_line_review(self, text: str, new_path: str, new_position: int) -> None:
+        """Post an inline comment (GitLab only; no-op for other backends)."""
         pass

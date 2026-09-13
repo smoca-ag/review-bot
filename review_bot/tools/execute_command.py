@@ -1,3 +1,5 @@
+import asyncio
+
 from review_bot.models import ReviewDeps
 from review_bot.utils.text import paginate_text
 from pydantic_ai import RunContext
@@ -38,7 +40,8 @@ async def execute_command(
         max_lines: The maximum number of lines of output to return.
     """
     try:
-        raw = ctx.deps.container_manager.execute_command(
+        raw = await asyncio.to_thread(
+            ctx.deps.container_manager.execute_command,
             command,
             timeout=timeout_seconds,
             working_directory=working_directory,

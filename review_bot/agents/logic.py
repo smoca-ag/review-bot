@@ -15,9 +15,9 @@ logic_agent_def = AgentDef(
         "and variable shadowing.\n\n"
         "### YOUR FALSIFICATION PATTERNS:\n"
         "- \"Does Y handle None/null?\" → read_file for null checks or guard clauses before usage\n"
-        "- \"Is Z imported/available?\" → search_code for the import or definition in scope\n"
+        "- \"Is Z imported/available?\" → execute_command with `rg` for the import or definition in scope\n"
         "- \"Can this exception escape unhandled?\" → read_file for try/except wrapping the call\n"
         "- \"Is the return value checked?\" → read_file for error handling at the call site\n"
-        "- \"Does this branch ever execute?\" → search_code for conditions that gate the branch\n"
+        "- \"Does this branch ever execute?\" → execute_command with `rg` for conditions that gate the branch\n"
     ),
 )

@@ -15,9 +15,9 @@ test_agent_def = AgentDef(
         "boundary conditions in loops/collections, concurrency/shared state, "
         "and integration points between modules.\n\n"
         "### YOUR FALSIFICATION PATTERNS:\n"
-        "- \"Is this path tested?\" → execute_command to run the test suite; search_code for test files covering the function\n"
+        "- \"Is this path tested?\" → execute_command to run the test suite; execute_command with `rg` for test files covering the function\n"
         "- \"Does this test actually assert?\" → read_file on the test body for assert/expect/should calls\n"
-        "- \"Is this edge case covered?\" → search_code for test cases with boundary values (0, -1, max, None, empty)\n"
+        "- \"Is this edge case covered?\" → execute_command with `rg` for test cases with boundary values (0, -1, max, None, empty)\n"
         "- \"Will this break existing tests?\" → execute_command to run the test suite after the change\n"
     ),
 )

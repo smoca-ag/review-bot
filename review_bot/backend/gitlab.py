@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import quote, urlparse
 
 import requests
@@ -66,7 +66,7 @@ def extract_gitlab_info(url: str) -> GitLabInfo:
     project_path = "/".join(project_parts)
 
     # Extract merge request id
-    mr_id_str: Optional[str] = None
+    mr_id_str: str | None = None
     for i in range(len(path_parts)):
         if path_parts[i] == "merge_requests" and i + 1 < len(path_parts):
             mr_id_str = path_parts[i + 1]
@@ -117,11 +117,11 @@ class Gitlab(BaseBackend):
         )
 
         # Instance attributes set during load()
-        self.current_user_id: Optional[int] = None
-        self.versions: List[Dict[str, Any]] = []
-        self.discussions: List[Dict[str, Any]] = []
+        self.current_user_id: int | None = None
+        self.versions: list[dict[str, Any]] = []
+        self.discussions: list[dict[str, Any]] = []
         self.diff_response: str
-        self.mr: Optional[Dict[str, Any]] = None
+        self.mr: dict[str, Any] | None = None
 
     def load(self) -> None:
         """Load all required data for the merge request."""
@@ -143,7 +143,7 @@ class Gitlab(BaseBackend):
 
         self.fetch_repository()
 
-    def get_current_user_id(self) -> Optional[int]:
+    def get_current_user_id(self) -> int | None:
         user_url = f"{self.gitlab_url}/api/v4/user"
         try:
             user_resp = requests.get(
@@ -180,12 +180,12 @@ class Gitlab(BaseBackend):
             return ""
         return self.mr.get("description", "")
 
-    def get_versions(self) -> Optional[List[Dict[str, Any]]]:
+    def get_versions(self) -> list[dict[str, Any]] | None:
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/versions"
         result = self.get_json_response(url)
         return result if isinstance(result, list) else None
 
-    def get_json_response(self, url: str) -> Optional[Dict[str, Any]]:
+    def get_json_response(self, url: str) -> dict[str, Any] | None:
         headers = {"PRIVATE-TOKEN": self.private_token}
         try:
             response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
@@ -195,9 +195,9 @@ class Gitlab(BaseBackend):
             self.logger.error(f"Error fetching {url}: {e}")
             return None
 
-    def get_paginated_response(self, url: str) -> List[Dict[str, Any]]:
+    def get_paginated_response(self, url: str) -> list[dict[str, Any]]:
         headers = {"PRIVATE-TOKEN": self.private_token}
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         while url:
             try:
                 response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
@@ -215,7 +215,7 @@ class Gitlab(BaseBackend):
             url = response.links.get("next", {}).get("url")
         return results
 
-    def get_text_response(self, url: str) -> Optional[str]:
+    def get_text_response(self, url: str) -> str | None:
         headers = {"PRIVATE-TOKEN": self.private_token}
         try:
             response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
@@ -225,15 +225,15 @@ class Gitlab(BaseBackend):
             self.logger.error(f"Error fetching {url}: {e}")
             return None
 
-    def get_merge_request_diff(self) -> Optional[str]:
+    def get_merge_request_diff(self) -> str | None:
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/raw_diffs"
         return self.get_text_response(url)
 
-    def get_mr(self) -> Optional[Dict[str, Any]]:
+    def get_mr(self) -> dict[str, Any] | None:
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}"
         return self.get_json_response(url)
 
-    def get_project(self) -> Optional[Dict[str, Any]]:
+    def get_project(self) -> dict[str, Any] | None:
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}"
         return self.get_json_response(url)
 
@@ -362,9 +362,9 @@ class Gitlab(BaseBackend):
 
     def _run_git_optional(
         self,
-        args: List[str],
+        args: list[str],
         cwd: str,
-        env: Dict[str, str],
+        env: dict[str, str],
         timeout: int,
         warning: str,
     ) -> None:
@@ -400,7 +400,7 @@ class Gitlab(BaseBackend):
             finally:
                 self.repo_dir = None
 
-    def get_discussion(self) -> Optional[List[Dict[str, Any]]]:
+    def get_discussion(self) -> list[dict[str, Any]] | None:
         url = f"{self.gitlab_url}/api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/discussions"
         return self.get_paginated_response(url)
 

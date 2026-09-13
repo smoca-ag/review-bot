@@ -46,9 +46,7 @@ def suggest_bot_improvement(
 
         entry = BotImprovementSuggestion(
             timestamp=datetime.now(timezone.utc).isoformat(),
-            agent_name=ctx.deps.mr_request.__class__.__name__
-            if hasattr(ctx.deps, "mr_request")
-            else "unknown",
+            agent_name=ctx.deps.agent_name or "unknown",
             category=category,
             description=description,
             suggestion=suggestion,

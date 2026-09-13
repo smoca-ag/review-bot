@@ -74,7 +74,7 @@ async def run_agent_pipeline(
 
     reports = {}
     for agent_def in SUB_AGENTS:
-        agent_deps = replace(deps, todo_items=[])
+        agent_deps = replace(deps, todo_items=[], agent_name=agent_def.name)
         res = await run_agent_with_span(
             agent_def.name,
             agents[f"{agent_def.name}_agent"],
@@ -93,7 +93,7 @@ async def run_agent_pipeline(
         safe_report = wrap_in_cdata(report.model_dump_json())
         critic_prompt += f"### {name.upper()} REPORT:\n<{name}_report>\n{safe_report}\n</{name}_report>\n\n"
 
-    critic_deps = replace(deps, todo_items=[])
+    critic_deps = replace(deps, todo_items=[], agent_name=critic_agent_def.name)
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span("agent_critic"):
         final_result = await agents["critic_agent"].run(critic_prompt, deps=critic_deps, usage_limits=usage_limits)
