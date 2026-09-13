@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from typing import NoReturn
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 from opentelemetry import trace
@@ -38,6 +39,7 @@ PORT = None
 GITLAB_WEBHOOK_LABEL = None
 GITLAB_WEBHOOK_REVIEW_ALL = None
 GITLAB_WEBHOOK_TOKEN = None
+GITLAB_URL = None
 MAX_PARALLEL_REVIEWS = None
 
 
@@ -49,6 +51,7 @@ def _load_config():
         GITLAB_WEBHOOK_LABEL, \
         GITLAB_WEBHOOK_REVIEW_ALL, \
         GITLAB_WEBHOOK_TOKEN, \
+        GITLAB_URL, \
         MAX_PARALLEL_REVIEWS
     HOST = os.environ.get("WEBHOOK_HOST", "0.0.0.0")
     PORT = int(os.environ.get("WEBHOOK_PORT", "8080"))
@@ -57,6 +60,7 @@ def _load_config():
         os.environ.get("GITLAB_WEBHOOK_REVIEW_ALL", "false").lower() == "true"
     )
     GITLAB_WEBHOOK_TOKEN = os.environ.get("GITLAB_WEBHOOK_TOKEN")
+    GITLAB_URL = os.environ.get("GITLAB_URL")
     MAX_PARALLEL_REVIEWS = int(os.environ.get("MAX_PARALLEL_REVIEWS", "3"))
 
 
@@ -149,15 +153,22 @@ class ReviewManager:
 
                 mr_url = self.queue.pop(0)
 
-                logger.info(f"Starting review for {mr_url}...")
-                p = multiprocessing.Process(
-                    target=start_ai_review,
-                    args=(mr_url,),
-                    name=f"AI-Review-{_sanitize_process_name(mr_url)}",
-                )
-                p.daemon = True
-                p.start()
-                self.active[mr_url] = p
+                try:
+                    logger.info(f"Starting review for {mr_url}...")
+                    p = multiprocessing.Process(
+                        target=start_ai_review,
+                        args=(mr_url,),
+                        name=f"AI-Review-{_sanitize_process_name(mr_url)}",
+                    )
+                    p.daemon = True
+                    p.start()
+                    self.active[mr_url] = p
+                except Exception as e:
+                    # Drop the MR instead of re-queuing (a persistent failure
+                    # would hot-spin); a later push/label event re-triggers it.
+                    # The process is not registered in self.active, so a dead
+                    # entry can never poison _has_capacity.
+                    logger.exception(f"Failed to start review for {mr_url}: {e}")
 
     def _reaper(self) -> None:
         last_sweep = time.monotonic()
@@ -184,6 +195,36 @@ class ReviewManager:
 
 def _sanitize_process_name(url: str) -> str:
     return url.rsplit("/", 1)[-1]
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin(url: str | None) -> str:
+    """Return the normalized ``scheme://host[:port]`` origin of a URL.
+
+    Scheme and host are lowercased; an explicit default port (``:80`` for
+    http, ``:443`` for https) is dropped so a configured
+    ``GITLAB_URL=https://gitlab.example.com:443`` still matches the
+    port-less URLs GitLab puts in webhook payloads.
+
+    Args:
+        url: Absolute URL, or None/empty for a degenerate origin.
+
+    Returns:
+        Normalized origin, suitable for host-pinning checks. URLs with an
+        unparsable port yield an "invalid" origin that never matches.
+    """
+    parsed = urlsplit(url or "")
+    scheme = parsed.scheme.lower()
+    try:
+        port = parsed.port
+    except ValueError:
+        return "invalid://"
+    hostname = (parsed.hostname or "").lower()
+    if port is not None and port == _DEFAULT_PORTS.get(scheme):
+        port = None
+    return f"{scheme}://{hostname}" + (f":{port}" if port else "")
 
 
 # Global manager instance, initialized in main()
@@ -358,6 +399,19 @@ class GitLabWebhookHandler(http.server.BaseHTTPRequestHandler):
                 )
                 return
 
+            # The review target must come from the pinned GITLAB_URL, never
+            # from the payload: the review sends GITLAB_API_TOKEN (API
+            # headers + git credentials) to whatever host the URL names.
+            expected_origin = _origin(GITLAB_URL)
+            actual_origin = _origin(mr_url)
+            if actual_origin != expected_origin:
+                logger.warning(
+                    f"Ignoring event for {mr_url}: origin {actual_origin} "
+                    f"does not match pinned GITLAB_URL ({expected_origin}). "
+                    "Refusing to send API credentials to an unpinned host."
+                )
+                return
+
             if review_manager:
                 review_manager.submit(mr_url)
             else:
@@ -410,6 +464,17 @@ def main():
         logger.critical("Please set this variable and restart the server.")
         return 1  # Return 1 for failure
 
+    # --- CRITICAL: GitLab Host Pinning Check ---
+    # Without a pinned host, a leaked webhook token would let an attacker
+    # aim reviews (and GITLAB_API_TOKEN) at any server via payload MR URLs.
+    if not GITLAB_URL:
+        logger.critical("FATAL: GITLAB_URL environment variable is not set.")
+        logger.critical(
+            "Set it to your GitLab base URL "
+            "(e.g. https://gitlab.example.com) and restart the server."
+        )
+        return 1  # Return 1 for failure
+
     global review_manager
     stale = prune_stale_containers(logger)
     if stale:
@@ -432,10 +497,14 @@ def main():
         server_address = (HOST, PORT)
         # Use ThreadingHTTPServer to handle multiple concurrent requests
         httpd = http.server.ThreadingHTTPServer(server_address, GitLabWebhookHandler)
+        # Without a timeout, handle_request() can block in accept() until the
+        # next connection, delaying shutdown_event detection by that long.
+        httpd.timeout = 1
 
         logger.info("Starting GitLab webhook server...")
         logger.info(f"Listening on: http://{HOST}:{PORT}")
         logger.info(f"Trigger Label: '{GITLAB_WEBHOOK_LABEL}'")
+        logger.info(f"Pinned GitLab URL: {GITLAB_URL}")
         logger.info("Token: Set (hidden for security)")
         logger.info("Press Ctrl+C to shut down.")
 

@@ -79,6 +79,7 @@ This tool leverages AI models via [Pydantic AI](https://ai.pydantic.dev/) to per
 
     # Webhook server configuration (if using review-bot-gitlab-webhook)
     # GITLAB_WEBHOOK_TOKEN="your_secret_webhook_token"  # REQUIRED for webhook
+    # GITLAB_URL="https://gitlab.example.com"  # REQUIRED for webhook: reviews are pinned to this host
     # WEBHOOK_HOST="0.0.0.0"
     # WEBHOOK_PORT="8080"
     # GITLAB_WEBHOOK_LABEL="ai-review-requested"
@@ -105,6 +106,7 @@ The script uses the following environment variables:
   - `MAX_LINES` (Optional): Max lines per file displayed in the diff before truncation. **Defaults to** `200`.
   - `MAX_LINE_LENGTH` (Optional): Max characters per diff line before truncation. **Defaults to** `150`.
   - `GITLAB_WEBHOOK_TOKEN` (Optional for CLI, **required** for webhook server): Secret token validated via HMAC on incoming webhook requests.
+  - `GITLAB_URL` (Optional for CLI, **required** for webhook server): Base URL of your GitLab instance (e.g. `https://gitlab.example.com`). Webhook-triggered reviews are pinned to this host; events whose MR URL points anywhere else are dropped, so the API token is never sent to a host named only in a webhook payload.
   - `WEBHOOK_HOST` (Optional): Webhook server bind address. **Defaults to** `0.0.0.0`.
   - `WEBHOOK_PORT` (Optional): Webhook server port. **Defaults to** `8080`.
   - `GITLAB_WEBHOOK_LABEL` (Optional): Label that triggers a review. **Defaults to** `ai-review-requested`.
@@ -167,7 +169,7 @@ review-bot --backend git "HEAD~1"
 Starts an HTTP server that listens for GitLab webhook events and automatically triggers reviews.
 
 ```bash
-# GITLAB_WEBHOOK_TOKEN is required — the server will exit with FATAL if unset
+# GITLAB_WEBHOOK_TOKEN and GITLAB_URL are required — the server will exit with FATAL if either is unset
 review-bot-gitlab-webhook
 ```
 

@@ -169,7 +169,7 @@ class TestContainerManagerRestart(unittest.TestCase):
 
 
 class TestContainerManagerSetup(unittest.TestCase):
-    def test_setup_uses_bind_mount_and_resource_limits(self):
+    def test_setup_uses_overlay_mount_and_resource_limits(self):
         logging.getLogger("container_manager_test").addHandler(logging.NullHandler())
         mgr = ContainerManager(logging.getLogger("container_manager_test"))
         run_cmds = []
@@ -194,9 +194,8 @@ class TestContainerManagerSetup(unittest.TestCase):
         self.assertRegex(mgr.container_name, r"^review-bot-p\d+-[0-9a-f]{8}$")
         self.assertEqual(_owner_pid(mgr.container_name), os.getpid())
         run_cmd = run_cmds[0]
-        mounts = [a for a in run_cmd if a.endswith(":/workspace")]
+        mounts = [a for a in run_cmd if a.endswith(":/workspace:O")]
         self.assertEqual(len(mounts), 1)
-        self.assertNotIn(":/workspace:O", run_cmd)
         for flag in ("--cpus=4", "--memory=8g", "--memory-swap=8g", "--pids-limit=8192"):
             self.assertIn(flag, run_cmd)
 

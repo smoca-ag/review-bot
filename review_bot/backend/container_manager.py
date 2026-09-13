@@ -1,8 +1,9 @@
 """Manages a sandboxed Podman container for code review tool execution.
 
-Independent of MR data, diff loading, and review posting. The container is
-mounted as a plain bind mount so that anything agents install inside the
-sandbox (node_modules, gems, ...) survives a transparent container restart.
+Independent of MR data, diff loading, and review posting. /workspace is
+mounted with Podman's ``:O`` copy-on-write overlay, so agent writes
+(installs, generated files) stay ephemeral and never reach the host —
+important for the Git backend, which mounts the user's live working tree.
 
 Container names embed the creating process's PID (``review-bot-p<PID>-<hex>``)
 so :func:`prune_stale_containers` can reclaim containers whose owner died
@@ -71,8 +72,9 @@ class ContainerManager:
     """Manages a sandboxed Podman container for code review tool execution.
 
     If the container dies mid-review (e.g. reclaimed by the host), the next
-    tool call restarts it once from the same image and mount; writes made by
-    earlier commands survive because ``/workspace`` is a plain bind mount.
+    tool call restarts it once from the same image and mount; writes to
+    ``/workspace`` are ephemeral (``:O`` overlay) and are gone with the old
+    container.
     """
 
     def __init__(self, logger: logging.Logger) -> None:
@@ -84,8 +86,16 @@ class ContainerManager:
         # so two threads never race on self.container_name.
         self._restart_lock = threading.Lock()
 
-    def setup(self, repo_dir: str, image: str = "review-bot-env:latest") -> None:
+    def setup(
+        self,
+        repo_dir: str,
+        image: str = "review-bot-env:latest",
+    ) -> None:
         """Create a sandboxed Podman container with the repository mounted.
+
+        /workspace is mounted with Podman's ``:O`` copy-on-write overlay:
+        agent writes never reach the host, and they do not survive a
+        container restart.
 
         Args:
             repo_dir: Host directory containing the repository checkout.
@@ -127,6 +137,7 @@ class ContainerManager:
 
         self.container_name = f"review-bot-p{os.getpid()}-{uuid.uuid4().hex[:8]}"
         abs_repo_dir = os.path.abspath(self.repo_dir)
+        workspace_mount = f"{abs_repo_dir}:/workspace:O"
         try:
             result = subprocess.run(
                 [
@@ -154,7 +165,7 @@ class ContainerManager:
                     "--name",
                     self.container_name,
                     "-v",
-                    f"{abs_repo_dir}:/workspace",
+                    workspace_mount,
                     "-w",
                     "/workspace",
                     self.image,

@@ -67,11 +67,21 @@ async def review(spec: str, backend: str, post: bool = False) -> None:
             # 5. Format and post results
             format_and_post_review(logger, mr_request, review_result, post)
         except Exception as e:
-            logger.error(f"CRITICAL: Flow failed. Error: {str(e)}")
+            logger.error(f"CRITICAL: Flow failed: {e}", exc_info=True)
             if post and mr_request is not None:
-                mr_request.post_review(
-                    "## AI Review Error\n\nThe AI reviewer encountered a fatal structural parsing validation issue."
-                )
+                try:
+                    # Only the exception type is posted: messages can embed
+                    # paths, hostnames, or config fragments; the full error
+                    # stays in the logs.
+                    mr_request.post_review(
+                        "## AI Review Error\n\nThe AI reviewer failed to complete "
+                        f"this review (`{type(e).__name__}`). "
+                        "Check the bot logs for the full traceback."
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to post the error comment to the merge request"
+                    )
         finally:
             if chroma_client is not None:
                 chroma_client.close()

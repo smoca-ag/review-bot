@@ -47,14 +47,17 @@ class GitlabReviewPoster:
         self._head_sha_fetched = False
 
     def get_current_head_sha(self) -> str | None:
-        """Fetch (and cache per review run) the MR's current head sha.
+        """Fetch the MR's current head sha, cached after the first success.
+
+        Failures are not cached: the next call retries, so one transient
+        API error does not suppress every inline comment for the rest of
+        the review.
 
         Returns:
             Head sha of the newest diff version, or None if it could not be
             determined.
         """
         if not self._head_sha_fetched:
-            self._head_sha_fetched = True
             url = (
                 f"{self.gitlab_url}/api/v4/projects/{self.project_id}"
                 f"/merge_requests/{self.merge_request_iid}/versions"
@@ -71,6 +74,7 @@ class GitlabReviewPoster:
                 self._current_head_sha = (
                     newest.get("head_commit_sha") if newest else None
                 )
+                self._head_sha_fetched = True
             except requests.RequestException as e:
                 self.logger.error(
                     f"Could not fetch MR versions at post time: {e}"

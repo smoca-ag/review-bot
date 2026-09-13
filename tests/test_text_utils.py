@@ -384,14 +384,33 @@ class TestTruncation(unittest.TestCase):
         self.assertEqual(result, diff)
 
     def test_truncate_line_count(self):
-        """Files above threshold are truncated to head only."""
+        """Files above threshold are truncated to the first max_lines lines."""
         diff = self._make_diff_with_n_lines(600)
         result = truncate_large_diff_files(
             diff, max_lines=100
         )
         self.assertIn("TRUNCATED", result)
-        self.assertIn("590 lines", result)  # 600 - 10
+        self.assertIn("500 lines", result)  # 600 - 100
         self.assertIn("+line 0", result)
+        self.assertIn("+line 98", result)  # 100 content lines incl. @@ header
+        self.assertNotIn("+line 99", result)
+
+    def test_truncation_marker_not_counted_as_diff_content(self):
+        """The marker must not start with a diff-content char, or hunk
+        walkers would count it as a context line."""
+        from review_bot.utils.diff import diff_line_mapping
+
+        diff = self._make_diff_with_n_lines(300)
+        result = truncate_large_diff_files(diff, max_lines=50)
+        markers = [ln for ln in result.splitlines() if "TRUNCATED" in ln]
+        self.assertEqual(len(markers), 1)
+        self.assertFalse(markers[0].startswith((" ", "+", "-", "@", "\\")))
+        # Kept lines map identically before and after truncation.
+        for line in (1, 40):
+            self.assertEqual(
+                diff_line_mapping(result, "src/foo.py", line),
+                diff_line_mapping(diff, "src/foo.py", line),
+            )
 
     def test_truncate_multiple_files(self):
         """Each file is evaluated independently."""

@@ -110,6 +110,36 @@ class TestDiffLineMapping(unittest.TestCase):
         )
 
 
+class TestHeadShaCaching(unittest.TestCase):
+    def setUp(self):
+        self.poster = GitlabReviewPoster(
+            "https://gitlab.example", "grp%2Fproj", 1, "tok", logging.getLogger()
+        )
+        self.loaded_versions = [
+            _version(2, "2026-01-02T00:00:00Z", "head2"),
+            _version(1, "2026-01-01T00:00:00Z", "head1"),
+        ]
+
+    @mock.patch("review_bot.backend.gitlab_poster.requests")
+    def test_transient_failure_is_retried_on_next_call(self, requests):
+        """One failed fetch must not suppress inline comments for the run."""
+        requests.RequestException = requests_lib.RequestException
+        requests.get.side_effect = [
+            requests_lib.RequestException("boom"),
+            _fake_response(json_data=self.loaded_versions),
+        ]
+        self.assertIsNone(self.poster.get_current_head_sha())
+        self.assertEqual(self.poster.get_current_head_sha(), "head2")
+        self.assertEqual(requests.get.call_count, 2)
+
+    @mock.patch("review_bot.backend.gitlab_poster.requests")
+    def test_success_is_cached(self, requests):
+        requests.get.return_value = _fake_response(json_data=self.loaded_versions)
+        self.assertEqual(self.poster.get_current_head_sha(), "head2")
+        self.assertEqual(self.poster.get_current_head_sha(), "head2")
+        self.assertEqual(requests.get.call_count, 1)
+
+
 class TestPostLineReview(unittest.TestCase):
     def setUp(self):
         self.poster = GitlabReviewPoster(

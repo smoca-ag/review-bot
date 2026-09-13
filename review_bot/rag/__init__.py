@@ -73,7 +73,7 @@ def build_vector_index(repo_dir: str, collection) -> int:
                     text = fh.read()
             except (IOError, OSError):
                 continue
-            if text.count("\n") > 1000 or len(text) > 500_000:
+            if len(text) > 500_000:
                 continue
             chunks = chunk_text(text, rel_path)
             if chunks:

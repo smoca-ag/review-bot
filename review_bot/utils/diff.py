@@ -118,7 +118,7 @@ def truncate_large_diff_files(
     Two independent mechanisms are applied:
 
     1. **Line-count truncation** — files whose diff content exceeds
-       *max_lines* are reduced to the first *keep_head* lines, with a
+       *max_lines* are reduced to the first *max_lines* lines, with a
        marker indicating how many lines were skipped.
 
     2. **Line-length truncation** — any individual diff line longer than
@@ -153,13 +153,14 @@ def truncate_large_diff_files(
 
         content = [_truncate_long_line(line, max_line_length) for line in content]
 
-        keep_head = max(10, max_lines // 10)
         if len(content) > max_lines:
-            head = content[:keep_head]
-            skipped = len(content) - keep_head
+            head = content[:max_lines]
+            skipped = len(content) - max_lines
 
+            # Column-0 marker: leading whitespace would make diff walkers
+            # count it as a context line and shift subsequent coordinates.
             truncation_marker = (
-                f"  ... [TRUNCATED {skipped} lines to save tokens. "
+                f"... [TRUNCATED {skipped} lines to save tokens. "
                 f"Total diff for {file_path} was {len(content)} lines.] ...\n"
             )
             result_parts.extend(header)
