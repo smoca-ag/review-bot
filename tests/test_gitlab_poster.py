@@ -312,5 +312,51 @@ class TestCleanupGhostNotes(unittest.TestCase):
         requests.delete.assert_not_called()
 
 
+class TestPostGeneralNote(unittest.TestCase):
+    def setUp(self):
+        self.poster = GitlabReviewPoster(
+            "https://gitlab.example", "grp%2Fproj", 1, "tok", logging.getLogger()
+        )
+        self.discussions = [
+            {
+                "notes": [
+                    {"id": 10, "system": False, "author": {"id": 7}, "body": "old"},
+                    {"id": 11, "system": False, "author": {"id": 7}, "body": "older"},
+                ]
+            }
+        ]
+
+    @mock.patch("review_bot.backend.gitlab_poster.requests")
+    def test_failed_update_posts_fresh_note_without_deleting(self, requests):
+        requests.RequestException = requests_lib.RequestException
+        requests.get.return_value = _fake_response(text=DIFF_TEXT)
+        requests.put.side_effect = requests_lib.RequestException("boom")
+        requests.post.return_value = _fake_response()
+
+        self.poster.post_review("new review", self.discussions, current_user_id=7)
+
+        self.assertEqual(requests.put.call_count, 1)
+        requests.delete.assert_not_called()
+        self.assertEqual(requests.post.call_count, 1)
+        self.assertTrue(requests.post.call_args.args[0].endswith("/notes"))
+        self.assertEqual(
+            requests.post.call_args.kwargs["json"], {"body": "new review"}
+        )
+
+    @mock.patch("review_bot.backend.gitlab_poster.requests")
+    def test_successful_update_deletes_extras_without_posting(self, requests):
+        requests.RequestException = requests_lib.RequestException
+        requests.get.return_value = _fake_response(text=DIFF_TEXT)
+        requests.put.return_value = _fake_response()
+        requests.delete.return_value = _fake_response()
+
+        self.poster.post_review("new review", self.discussions, current_user_id=7)
+
+        self.assertEqual(requests.delete.call_count, 1)
+        deleted_id = requests.delete.call_args.args[0].rstrip("/").split("/")[-1]
+        self.assertEqual(deleted_id, "11")
+        requests.post.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,12 +8,12 @@ AI-powered code review bot built with [Pydantic AI](https://ai.pydantic.dev/). R
 - Docstrings: Google-style (`Args:`, `Returns:`, `Raises:`)
 - Type hints: Python 3.10+ union syntax (`str | None`) — do NOT use `Optional[str]`
 - Module-level docstring at top of each file describing the module's purpose
-- Build system: `pyproject.toml` only (no `setup.py`, no `setup.cfg`). Dependencies, entry points, and `mypy` config all live there.
+- Build system: `pyproject.toml` only (no `setup.py`, no `setup.cfg`). Dependencies and entry points live there; `mypy` runs with default settings (`mypy review_bot/`).
 - The codebase is **primarily async** (`asyncio`). CLI entry (`cli.py:main`), the agent pipeline (`pipeline.py`), and tool calls are all `async def`.
 
 ## For AI Assistants
 
-**When you add or remove an environment variable**, update both the `Configuration` table below and the `Configuration` section and `.env` example in `README.md`.
+**When you add or remove an environment variable**, update both the `Configuration` table below and the `Configuration` section and `.env` example in `Readme.md`.
 
 **When you add or change a key design decision**, add it to the `Key Design Decisions` section below and keep it up to date.
 

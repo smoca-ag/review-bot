@@ -341,6 +341,24 @@ class TestPythonResolution(unittest.TestCase):
         result = _resolve_python_import("nonexistent.module", "app.py", self.tmpdir)
         self.assertIsNone(result)
 
+    def test_resolve_relative_sibling(self):
+        result = _resolve_python_import(".utils", "pkg/app.py", self.tmpdir)
+        self.assertEqual(result, os.path.join("pkg", "utils.py"))
+
+    def test_resolve_relative_package_init(self):
+        result = _resolve_python_import(".", "pkg/app.py", self.tmpdir)
+        self.assertEqual(result, os.path.join("pkg", "__init__.py"))
+
+    def test_resolve_relative_parent(self):
+        with open(os.path.join(self.tmpdir, "pkg", "shared.py"), "w") as f:
+            f.write("SHARED = 1\n")
+        result = _resolve_python_import("..shared", "pkg/sub/mod.py", self.tmpdir)
+        self.assertEqual(result, os.path.join("pkg", "shared.py"))
+
+    def test_unresolvable_relative_import(self):
+        result = _resolve_python_import(".nope", "pkg/app.py", self.tmpdir)
+        self.assertIsNone(result)
+
 
 class TestKotlinParsing(unittest.TestCase):
     def setUp(self):

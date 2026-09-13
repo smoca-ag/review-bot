@@ -1,6 +1,7 @@
 """Tests for ReviewManager worker resilience against process-start failures."""
 
 import multiprocessing
+import threading
 import time
 import unittest
 from unittest import mock
@@ -84,6 +85,78 @@ class TestWorkerResilience(unittest.TestCase):
 
         self.assertTrue(self.manager.worker_thread.is_alive())
         self.assertNotIn(MR_FAIL, self.manager.active)
+
+
+class TestSubmitRace(unittest.TestCase):
+    """submit() must never leave a started review process untracked in active."""
+
+    MR = "https://gitlab.example.com/group/project/-/merge_requests/1"
+
+    def setUp(self):
+        self.manager = ReviewManager(max_parallel=2)
+        self.started: list[mock.MagicMock] = []
+        self.killed: list[mock.MagicMock] = []
+        self.kill_started = threading.Event()
+        self.release_kill = threading.Event()
+        self.first_kill = True
+
+    def tearDown(self):
+        self.release_kill.set()
+        self.manager.active.clear()
+
+    def _new_proc(self) -> mock.MagicMock:
+        proc = mock.MagicMock()
+        proc.is_alive.return_value = True
+        self.started.append(proc)
+        return proc
+
+    def _fake_kill(self, proc: mock.MagicMock) -> None:
+        if self.first_kill:
+            self.first_kill = False
+            self.kill_started.set()
+            self.assertTrue(self.release_kill.wait(timeout=5))
+        self.killed.append(proc)
+
+    def test_submit_during_kill_window_leaves_no_orphan(self):
+        with mock.patch.object(
+            multiprocessing, "Process", side_effect=lambda *a, **k: self._new_proc()
+        ):
+            with mock.patch.object(
+                self.manager, "_kill_process", side_effect=self._fake_kill
+            ):
+                self.manager.submit(self.MR)
+                self.assertTrue(
+                    _wait_for(
+                        lambda: self.started
+                        and self.manager.active.get(self.MR) is self.started[0]
+                    ),
+                    "first review never became active",
+                )
+
+                killer = threading.Thread(target=self.manager.submit, args=(self.MR,))
+                killer.start()
+                self.assertTrue(
+                    self.kill_started.wait(timeout=5), "submit never entered the kill"
+                )
+
+                # Second event lands while the first submit blocks in the kill.
+                self.manager.submit(self.MR)
+                _wait_for(lambda: len(self.started) >= 2)
+
+                self.release_kill.set()
+                killer.join(timeout=10)
+
+        self.assertTrue(_wait_for(lambda: not self.manager.queue), "queue never drained")
+        time.sleep(0.5)  # grace period for any late (old-code) process start
+
+        survivors = [p for p in self.started if p not in self.killed]
+        self.assertEqual(
+            len(survivors),
+            1,
+            f"expected exactly one un-killed process: "
+            f"started={len(self.started)}, killed={len(self.killed)}",
+        )
+        self.assertIs(self.manager.active.get(self.MR), survivors[0])
 
 
 if __name__ == "__main__":

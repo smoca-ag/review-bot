@@ -15,7 +15,6 @@ from review_bot.backend.base_backend import BaseBackend
 from review_bot.backend.gitlab_poster import GitlabReviewPoster
 
 logger = logging.getLogger(__name__)
-from review_bot.utils.diff import resolve_diff_coordinates
 
 tracer = trace.get_tracer(__name__)
 
@@ -244,7 +243,9 @@ class Gitlab(BaseBackend):
             project = self.get_project()
             if not project or "http_url_to_repo" not in project:
                 self.logger.error("Could not get project details for cloning.")
-                return
+                raise RuntimeError(
+                    "Could not get project details for cloning. Cannot proceed."
+                )
 
             clone_url = project["http_url_to_repo"]
 

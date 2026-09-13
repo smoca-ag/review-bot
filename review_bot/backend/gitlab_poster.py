@@ -242,6 +242,7 @@ class GitlabReviewPoster:
                     if note.get("type") != "DiffNote":
                         existing_notes.append(note)
 
+        updated = False
         if existing_notes:
             note_to_update = existing_notes[0]
             update_url = f"{notes_url}/{note_to_update['id']}"
@@ -253,20 +254,25 @@ class GitlabReviewPoster:
                     timeout=REQUEST_TIMEOUT,
                 )
                 update_resp.raise_for_status()
+                updated = True
                 self.logger.info("Successfully updated existing general MR note.")
             except requests.RequestException as e:
                 self.logger.error(f"Error updating general MR note: {e}")
 
-            for note in existing_notes[1:]:
-                delete_url = f"{notes_url}/{note['id']}"
-                try:
-                    del_resp = requests.delete(
-                        delete_url, headers=headers, timeout=REQUEST_TIMEOUT
-                    )
-                    del_resp.raise_for_status()
-                except requests.RequestException as e:
-                    self.logger.error(f"Error deleting old general MR note: {e}")
-        else:
+            if updated:
+                for note in existing_notes[1:]:
+                    delete_url = f"{notes_url}/{note['id']}"
+                    try:
+                        del_resp = requests.delete(
+                            delete_url, headers=headers, timeout=REQUEST_TIMEOUT
+                        )
+                        del_resp.raise_for_status()
+                    except requests.RequestException as e:
+                        self.logger.error(
+                            f"Error deleting old general MR note: {e}"
+                        )
+
+        if not updated:
             payload = {"body": text}
             try:
                 response = requests.post(

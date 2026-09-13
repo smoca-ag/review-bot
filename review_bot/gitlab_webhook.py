@@ -43,6 +43,24 @@ GITLAB_URL = None
 MAX_PARALLEL_REVIEWS = None
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read an integer environment variable, exiting fatally on bad input.
+
+    Args:
+        name: Environment variable to read.
+        default: Value used when the variable is unset.
+
+    Returns:
+        The parsed integer value.
+    """
+    raw = os.environ.get(name, str(default))
+    try:
+        return int(raw)
+    except ValueError:
+        logger.critical(f"FATAL: {name} must be an integer, got {raw!r}.")
+        sys.exit(1)
+
+
 def _load_config():
     """Populate module-level config from environment variables."""
     global \
@@ -54,14 +72,14 @@ def _load_config():
         GITLAB_URL, \
         MAX_PARALLEL_REVIEWS
     HOST = os.environ.get("WEBHOOK_HOST", "0.0.0.0")
-    PORT = int(os.environ.get("WEBHOOK_PORT", "8080"))
+    PORT = _env_int("WEBHOOK_PORT", 8080)
     GITLAB_WEBHOOK_LABEL = os.environ.get("GITLAB_WEBHOOK_LABEL", "ai-review-requested")
     GITLAB_WEBHOOK_REVIEW_ALL = (
         os.environ.get("GITLAB_WEBHOOK_REVIEW_ALL", "false").lower() == "true"
     )
     GITLAB_WEBHOOK_TOKEN = os.environ.get("GITLAB_WEBHOOK_TOKEN")
     GITLAB_URL = os.environ.get("GITLAB_URL")
-    MAX_PARALLEL_REVIEWS = int(os.environ.get("MAX_PARALLEL_REVIEWS", "3"))
+    MAX_PARALLEL_REVIEWS = _env_int("MAX_PARALLEL_REVIEWS", 3)
 
 
 # --- The function to run in a separate process ---
@@ -112,18 +130,15 @@ class ReviewManager:
         self.reaper_thread.start()
 
     def submit(self, mr_url: str) -> None:
-        # Kill running process for this MR without holding the lock
-        process_to_kill = None
+        # Pop the running process and re-queue the MR in one atomic step:
+        # the worker registers a started process under active[mr_url] inside
+        # a single lock acquisition, so keeping the dict-removal and the
+        # queue-append together prevents the worker from starting a second
+        # process whose registration would overwrite the first (leaving it
+        # untracked and uncancellable). The kill runs afterwards, off-lock.
         with self.condition:
-            if mr_url in self.active:
-                process_to_kill = self.active.pop(mr_url)
+            process_to_kill = self.active.pop(mr_url, None)
 
-        if process_to_kill and process_to_kill.is_alive():
-            logger.info(f"Cancelling in-progress review for {mr_url}")
-            self._kill_process(process_to_kill)
-
-        with self.condition:
-            # Replace any queued entry for this MR
             if mr_url in self.queue:
                 self.queue.remove(mr_url)
                 logger.info(f"Replaced queued review for {mr_url}")
@@ -131,6 +146,10 @@ class ReviewManager:
             self.queue.append(mr_url)
             logger.info(f"Queued review for {mr_url}. Queue: {len(self.queue)}, Active: {len(self.active)}")
             self.condition.notify_all()
+
+        if process_to_kill and process_to_kill.is_alive():
+            logger.info(f"Cancelling in-progress review for {mr_url}")
+            self._kill_process(process_to_kill)
 
     def _kill_process(self, p: multiprocessing.Process) -> None:
         if p.pid is None:

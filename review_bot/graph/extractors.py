@@ -342,23 +342,38 @@ def _extract_python_definitions(source: bytes, lang: ts.Language) -> list[str]:
 
 
 def _resolve_python_import(raw: str, source_file: str, repo_dir: str) -> str | None:
-    path = raw.replace(".", "/")
+    dots = len(raw) - len(raw.lstrip("."))
     source_dir = os.path.dirname(source_file)
 
-    candidates: list[str] = []
-    candidates.extend([
-        os.path.join(repo_dir, source_dir, path + ".py"),
-        os.path.join(repo_dir, source_dir, path, "__init__.py"),
-    ])
-    candidates.extend([
-        os.path.join(repo_dir, path + ".py"),
-        os.path.join(repo_dir, path, "__init__.py"),
-    ])
+    if dots:
+        # Relative import: anchors on the current package. "from . import x"
+        # and "from .mod import y" resolve against source_file's directory,
+        # each extra dot goes one level up ("from ..shared" -> parent dir).
+        base = source_dir
+        for _ in range(dots - 1):
+            base = os.path.dirname(base)
+        path = raw[dots:].replace(".", "/")
+        candidates = [
+            os.path.join(repo_dir, base, path + ".py") if path else "",
+            os.path.join(repo_dir, base, path, "__init__.py") if path
+            else os.path.join(repo_dir, base, "__init__.py"),
+        ]
+    else:
+        path = raw.replace(".", "/")
+        candidates = [
+            os.path.join(repo_dir, source_dir, path + ".py"),
+            os.path.join(repo_dir, source_dir, path, "__init__.py"),
+            os.path.join(repo_dir, path + ".py"),
+            os.path.join(repo_dir, path, "__init__.py"),
+        ]
 
     for c in candidates:
         full = os.path.normpath(c)
-        if os.path.isfile(full):
-            return os.path.relpath(full, repo_dir)
+        rel = os.path.relpath(full, repo_dir)
+        # Guard against dot sequences escaping the repository root.
+        if rel.startswith("..") or not os.path.isfile(full):
+            continue
+        return rel
     return None
 
 

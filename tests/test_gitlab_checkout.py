@@ -1,7 +1,9 @@
 """Unit tests for Gitlab.fetch_repository checkout behavior (mocked subprocess)."""
 
 import logging
+import os
 import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -89,6 +91,21 @@ class TestFetchRepository(unittest.TestCase):
             cmds = self._fetch(fake_run)
 
         self.assertIsNotNone(self.backend.repo_dir)
+
+    def test_missing_project_details_raises_and_cleans_temp(self):
+        fake_dir = tempfile.mkdtemp()
+        with mock.patch(
+            "review_bot.backend.gitlab.tempfile.mkdtemp", return_value=fake_dir
+        ):
+            with mock.patch.object(self.backend, "get_project", return_value=None):
+                with mock.patch(
+                    "review_bot.backend.gitlab.subprocess.run"
+                ) as run_mock:
+                    with self.assertRaises(RuntimeError):
+                        self.backend.fetch_repository()
+        run_mock.assert_not_called()
+        self.assertFalse(os.path.isdir(fake_dir))
+        self.assertIsNone(self.backend.repo_dir)
 
 
 if __name__ == "__main__":

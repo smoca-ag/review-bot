@@ -33,12 +33,14 @@ async def execute_command(
 
     Args:
         command: The shell command to execute.
-        timeout_seconds: Maximum allowed execution time in seconds (default 60).
+        timeout_seconds: Maximum allowed execution time in seconds (default 60,
+            capped at 600).
         working_directory: The directory to set as the current working directory for command execution.
         environment: Environment variables to set for the command, as key-value pairs.
         start_line: The line number to start reading output from for pagination.
         max_lines: The maximum number of lines of output to return.
     """
+    timeout_seconds = max(1, min(timeout_seconds, 600))
     try:
         raw = await asyncio.to_thread(
             ctx.deps.container_manager.execute_command,
