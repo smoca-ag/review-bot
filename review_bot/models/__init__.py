@@ -62,24 +62,46 @@ class SubAgentReport(BaseModel):
 
 
 class FinalReviewResult(BaseModel):
-    summary: str = Field(description="A brief summary of the combined findings.")
+    summary: str = Field(
+        description=(
+            "A brief summary of the combined findings. One or two sentences, max ~40 words."
+        )
+    )
     has_purpose: bool
     has_test_plan: bool
-    description_feedback: list[str]
+    description_feedback: list[str] = Field(
+        description=(
+            "Only missing/vague/inadequate description elements. "
+            "One sentence per item, max 3 items. [] if fine."
+        )
+    )
     security_concerns: list[str] = Field(
-        description="High-level security warnings to put in the PR body."
+        description=(
+            "High-level security warnings to put in the PR body. "
+            "One sentence per item, max 3 items."
+        )
     )
     architectural_feedback: list[str] = Field(
-        description="High-level design and structure feedback."
+        description=(
+            "High-level design and structure feedback. One sentence per item, max 3 items."
+        )
     )
     testing_feedback: list[str] = Field(
-        description="High-level testing strategy and coverage feedback."
+        description=(
+            "High-level testing strategy and coverage feedback. "
+            "One sentence per item, max 3 items."
+        )
     )
     performance_feedback: list[str] = Field(
-        description="High-level performance and scalability feedback."
+        description=(
+            "High-level performance and scalability feedback. "
+            "One sentence per item, max 3 items."
+        )
     )
     actionable_feedback: list[str] = Field(
-        description="High-level code bugs to put in the PR body."
+        description=(
+            "High-level code bugs to put in the PR body. One sentence per item, max 3 items."
+        )
     )
     recommend_approval: bool = Field(
         description="True if there are no major issues and description is adequate."

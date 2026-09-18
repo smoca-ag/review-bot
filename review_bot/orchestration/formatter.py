@@ -1,3 +1,5 @@
+"""Format the critic's FinalReviewResult as a GitLab markdown comment and post it."""
+
 import os
 
 from review_bot.models import FinalReviewResult
@@ -13,6 +15,13 @@ def _derive_severity(comment) -> str:
     return "MINOR"
 
 
+def _section(title: str, items: list[str], collapsed: bool = False) -> str:
+    body = "\n".join(f"- {item}" for item in items)
+    if collapsed:
+        return f"<details>\n<summary>{title}</summary>\n\n{body}\n\n</details>\n\n"
+    return f"## {title}\n{body}\n\n"
+
+
 def format_and_post_review(logger, mr_request, review_result: FinalReviewResult, post):
     status_icon = "✅" if review_result.recommend_approval else "❌"
     header_identifier = "# 🤖 AI Review"
@@ -21,41 +30,33 @@ def format_and_post_review(logger, mr_request, review_result: FinalReviewResult,
     markdown_comment += f"## Summary\n {review_result.summary}\n\n"
 
     if review_result.description_feedback:
-        markdown_comment += (
-            "## 📝 PR Description Improvements\n"
-            + "\n".join(f"- {f}" for f in review_result.description_feedback)
-            + "\n\n"
+        markdown_comment += _section(
+            "📝 PR Description Improvements",
+            review_result.description_feedback,
+            collapsed=True,
         )
     if review_result.security_concerns:
-        markdown_comment += (
-            "## 🚨 Security Concerns\n"
-            + "\n".join(f"- {c}" for c in review_result.security_concerns)
-            + "\n\n"
+        markdown_comment += _section(
+            "🚨 Security Concerns", review_result.security_concerns
         )
     if review_result.architectural_feedback:
-        markdown_comment += (
-            "## 🏗️ Architecture & Design\n"
-            + "\n".join(f"- {f}" for f in review_result.architectural_feedback)
-            + "\n\n"
+        markdown_comment += _section(
+            "🏗️ Architecture & Design",
+            review_result.architectural_feedback,
+            collapsed=True,
         )
     if review_result.performance_feedback:
-        markdown_comment += (
-            "## 🚀 Performance & Scalability\n"
-            + "\n".join(f"- {f}" for f in review_result.performance_feedback)
-            + "\n\n"
+        markdown_comment += _section(
+            "🚀 Performance & Scalability",
+            review_result.performance_feedback,
+            collapsed=True,
         )
     if review_result.testing_feedback:
-        markdown_comment += (
-            "## 🧪 Testing & QA\n"
-            + "\n".join(f"- {f}" for f in review_result.testing_feedback)
-            + "\n\n"
+        markdown_comment += _section(
+            "🧪 Testing & QA", review_result.testing_feedback, collapsed=True
         )
     if review_result.actionable_feedback:
-        markdown_comment += (
-            "## 🛠️ Code Feedback\n"
-            + "\n".join(f"- {f}" for f in review_result.actionable_feedback)
-            + "\n\n"
-        )
+        markdown_comment += _section("🛠️ Code Feedback", review_result.actionable_feedback)
     if review_result.critical_line_comments:
         markdown_comment += (
             "## 📌 Inline Comments\n"
