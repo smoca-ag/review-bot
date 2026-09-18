@@ -20,7 +20,7 @@ def create_agents() -> dict:
         "deps_type": ReviewDeps,
         "tools": shared_tools,
         "retries": 3,
-        "capabilities": [Thinking(effort="high")],
+        "capabilities": [Thinking(effort="medium")],
         "model_settings": {"timeout": 1800},
         "system_prompt": SHARED_SUB_AGENT_SYSTEM_PROMPT,
     }
