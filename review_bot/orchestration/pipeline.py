@@ -15,10 +15,26 @@ from review_bot.utils.text import inject_line_numbers, wrap_in_cdata
 logger = logging.getLogger(__name__)
 
 
-async def run_agent_with_span(agent_name, agent, prompt, deps, usage_limits):
+async def run_agent_with_span(agent_name, agent, prompt, deps, usage_limits, message_history=None):
+    """Run one agent inside an OTel span.
+
+    Args:
+        agent_name: Name used for the span and telemetry attributes.
+        agent: The pydantic-ai Agent instance to run.
+        prompt: The user prompt for this run.
+        deps: ReviewDeps passed to the agent and its tools.
+        usage_limits: pydantic-ai UsageLimits for this run.
+        message_history: Prior conversation messages to continue, or None to
+            start fresh.
+
+    Returns:
+        The AgentRunResult of the run.
+    """
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span(f"agent_{agent_name}") as _span:
-        return await agent.run(prompt, deps=deps, usage_limits=usage_limits)
+        return await agent.run(
+            prompt, deps=deps, usage_limits=usage_limits, message_history=message_history
+        )
 
 
 def build_review_prompt(mr_request) -> str:
@@ -51,8 +67,14 @@ async def run_agent_pipeline(
     vector_index,
     dep_graph=None,
 ):
-    """Execute sub-agents sequentially (prefix cache optimization), then run the critic.
-    
+    """Execute sub-agents sequentially, then run the critic.
+
+    The context agent runs on the full prompt and its transcript is reused as
+    message_history for the five judgment agents, so the MR content and the
+    fact-finding exploration are sent to the model only once. Judgment agents
+    still reach their own conclusions independently — only fact-finding is
+    shared. The critic runs fresh on the consolidated reports.
+
     Returns the FinalReviewResult from the critic.
     """
     from pydantic_ai.usage import UsageLimits
@@ -69,19 +91,32 @@ async def run_agent_pipeline(
     )
 
     logger.info(
-        f"Launching {len(SUB_AGENTS)} specialized agents sequentially (Shared Prefix Cache Enabled)..."
+        f"Launching {len(SUB_AGENTS)} specialized agents sequentially (context transcript seeded to judgment agents)..."
     )
 
     reports = {}
+    context_transcript = None
     for agent_def in SUB_AGENTS:
         agent_deps = replace(deps, todo_items=[], agent_name=agent_def.name)
-        res = await run_agent_with_span(
-            agent_def.name,
-            agents[f"{agent_def.name}_agent"],
-            secure_base_prompt + agent_def.specialty_prompt,
-            deps=agent_deps,
-            usage_limits=usage_limits,
-        )
+        if context_transcript is None:
+            res = await run_agent_with_span(
+                agent_def.name,
+                agents[f"{agent_def.name}_agent"],
+                secure_base_prompt + agent_def.specialty_prompt,
+                deps=agent_deps,
+                usage_limits=usage_limits,
+            )
+            if agent_def.name == "context":
+                context_transcript = res.all_messages()
+        else:
+            res = await run_agent_with_span(
+                agent_def.name,
+                agents[f"{agent_def.name}_agent"],
+                agent_def.specialty_prompt,
+                deps=agent_deps,
+                usage_limits=usage_limits,
+                message_history=context_transcript,
+            )
         reports[agent_def.name] = res.output
 
     logger.info(

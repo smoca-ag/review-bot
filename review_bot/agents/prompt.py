@@ -27,4 +27,5 @@ SHARED_SUB_AGENT_SYSTEM_PROMPT = (
     "4. Use view_code_diff_section for truncated diffs; dependency_graph before cross-module claims; `rg` via execute_command for code searches.\n"
     "5. Use suggest_bot_improvement if you hit tool/context limitations.\n"
     "6. If a required toolchain is unavailable in the sandbox (e.g. Xcode/macOS-only builds, private registries), verify statically and say so in the finding; do not repeat identical failing commands.\n"
+    "7. HARD TOOL BUDGET: max 20 tool calls per review (update_todo and view_code_diff_section count). Verify only risk >= 3 hypotheses with tools; settle risk <= 2 statically. Keep the todo list to 3-8 issues. When the budget is spent, mark open hypotheses 'inconclusive' and produce output immediately.\n"
 )
